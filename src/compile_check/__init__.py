@@ -3,8 +3,11 @@
 Bring your own model; compile-check tells you whether ``torch.compile`` changed
 its answers, and if so hands you a minimal repro and a ready-to-file report.
 
-Status: M0 scaffold. Only :mod:`compile_check.env` does real work; every other
-module is a typed stub that raises :class:`NotImplementedError`.
+Status: M1 in progress. :mod:`compile_check.env`, :mod:`compile_check.discover`,
+:mod:`compile_check.runner`, and the numerics and metadata oracles are
+implemented; the alias, grad, and graph oracles, the localizer, the minimizer,
+and the reports are still typed stubs that raise :class:`NotImplementedError`.
+The CLI's main path is not wired up until M1-3.
 """
 
 from __future__ import annotations
