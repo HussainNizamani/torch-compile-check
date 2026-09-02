@@ -133,10 +133,10 @@ checks
   numerics  yes      pass              pass
   alias     yes      pass              pass
   metadata  yes      pass              pass
-  grad      yes      not yet           not yet
+  grad      yes      pass              pass
   graph     no       not yet           not yet
 
-  pass = no finding   not yet = the oracle lands in M2 or M3
+  pass = no finding   not yet = the oracle lands in M3
 
 findings
   none
@@ -172,10 +172,10 @@ checks
   numerics  yes      pass              1 fail
   alias     no       pass              pass
   metadata  yes      pass              1 fail 1 warn
-  grad      no       not yet           not yet
+  grad      no       pass              pass
   graph     no       not yet           not yet
 
-  pass = no finding   not yet = the oracle lands in M2 or M3
+  pass = no finding   not yet = the oracle lands in M3
 
 findings
   numerics  (1 fail)

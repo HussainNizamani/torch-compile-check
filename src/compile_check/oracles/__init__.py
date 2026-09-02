@@ -10,8 +10,8 @@ Two names, deliberately not one. :data:`ORACLE_NAMES` is the ``--fail-on``
 vocabulary from PLAN.md "CLI surface for v1", which is fixed at five for v1 and
 is what a typo is checked against; :data:`ORACLES` is the registry of the
 oracles that actually run today, so a build reports on what it implements
-without the CLI having to hard-code a second list. The two converge when M2-2
-and M3 land grad and graph.
+without the CLI having to hard-code a second list. The two converge when M3
+lands the graph oracle, the last one still missing.
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ from compile_check.oracles.base import (
     OracleConfig,
     Severity,
 )
+from compile_check.oracles.grad import GradOracle
 from compile_check.oracles.metadata import MetadataOracle
 from compile_check.oracles.numerics import NumericsOracle
 from compile_check.results import BackendResult
@@ -44,13 +45,14 @@ __all__ = [
 # The --fail-on vocabulary, in the order PLAN.md "Oracles" lists them.
 ORACLE_NAMES: tuple[str, ...] = ("numerics", "alias", "metadata", "grad", "graph")
 
-# The oracles a run can actually use, keyed by their --fail-on name. grad lands
-# in M2-2 and graph in M3; until then a --fail-on naming them parses and is
-# reported as not yet running rather than silently passing.
+# The oracles a run can actually use, keyed by their --fail-on name. graph lands
+# in M3; until then a --fail-on naming it parses and is reported as not yet
+# running rather than silently passing.
 ORACLES: dict[str, Oracle] = {
     "numerics": NumericsOracle(),
     "alias": AliasOracle(),
     "metadata": MetadataOracle(),
+    "grad": GradOracle(),
 }
 
 

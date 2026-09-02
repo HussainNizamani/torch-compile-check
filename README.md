@@ -3,11 +3,11 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 <!-- badge placeholders: CI, PyPI, and the torch matrix land with M4 -->
 
-> **Status: M2 in progress, the tool runs end to end with three of the five
+> **Status: M2 in progress, the tool runs end to end with four of the five
 > oracles.** Point it at a model and it runs eager, `aot_eager`, and `inductor`,
-> compares the numerics, the aliasing and mutation behaviour, and the output
-> metadata, names the compilation stage a divergence first appears in, and prints
-> a report. The grad oracle (M2-2), the graph oracle and the JSON, Markdown, and
+> compares the numerics, the aliasing and mutation behaviour, the output
+> metadata, and the gradients, names the compilation stage a divergence first
+> appears in, and prints a report. The graph oracle and the JSON, Markdown, and
 > pytest-case reports (M3) are still stubs; the report says which checks did not
 > run, so a missing oracle never reads as a passing one.
 
@@ -40,7 +40,7 @@ checks
   numerics  yes      pass              pass
   alias     yes      pass              pass
   metadata  yes      pass              pass
-  grad      yes      not yet           not yet
+  grad      yes      pass              pass
   graph     no       not yet           not yet
 
 stage

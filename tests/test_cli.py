@@ -203,19 +203,18 @@ def test_every_module_imports():
 
 def test_stubs_raise_not_implemented():
     # discover.py and runner.py landed in M1-1, the numerics and metadata
-    # oracles in M1-2, localize.py plus report/terminal.py in M1-3, and the
-    # alias oracle in M2-1; each is covered by its own test module. What is left
-    # below is what M2-2 and M3 still owe.
+    # oracles in M1-2, localize.py plus report/terminal.py in M1-3, the alias
+    # oracle in M2-1 and the grad oracle in M2-2; each is covered by its own
+    # test module. What is left below is what M3 still owes.
     from compile_check import minimize
-    from compile_check.oracles import grad, graph
+    from compile_check.oracles import graph
     from compile_check.report import json as json_report
     from compile_check.report import markdown, pytest_case
 
     with pytest.raises(NotImplementedError):
         minimize.minimize(None, None, lambda _fn, _inputs: True)
-    for oracle in (grad, graph):
-        with pytest.raises(NotImplementedError):
-            oracle.check({}, {})
+    with pytest.raises(NotImplementedError):
+        graph.check({}, {})
     with pytest.raises(NotImplementedError):
         json_report.dump({}, Path("out.json"))
     with pytest.raises(NotImplementedError):
@@ -270,10 +269,10 @@ def test_run_only_reports_the_oracles_and_finds_nothing_on_a_clean_model(capsys)
     code = main([str(FIXTURES / "mlp.py"), "--run-only", "--backends", "eager,aot_eager"])
     out = capsys.readouterr().out
     assert code == EXIT_OK
-    # The three that run, and the two that do not exist yet: "not checked"
+    # The four that run, and the one that does not exist yet: "not checked"
     # must not read as "checked and clean".
-    assert "oracles    numerics, alias, metadata" in out
-    assert "not implemented yet, nothing checked: grad, graph" in out
+    assert "oracles    numerics, alias, metadata, grad" in out
+    assert "not implemented yet, nothing checked: graph" in out
     assert "findings\n  none" in out
 
 
@@ -286,7 +285,7 @@ def test_fail_on_narrows_the_verdict_not_the_checks(capsys):
     )
     out = capsys.readouterr().out
     assert code == EXIT_OK
-    assert "oracles    numerics, alias, metadata" in out
+    assert "oracles    numerics, alias, metadata, grad" in out
     assert "fail-on    metadata\n" in out
 
 
@@ -557,6 +556,59 @@ def test_a_backend_the_target_registers_survives_a_cold_run(tmp_path):
     assert "unknown backend" not in completed.stderr
     assert "raised BackendCompilerFailed" in completed.stdout
     assert f"first diverges at {backend}" in completed.stdout
+
+
+def test_fail_on_grad_drives_the_exit_code_on_a_backward_only_divergence(capsys):
+    # The grad oracle's half of the --fail-on rule, on a real run: this backend
+    # runs the traced graph unchanged and raises in the backward, so the only
+    # divergence in the report is a grad one. It fails the run when grad is a
+    # --fail-on category and not otherwise, and it is a finding either way.
+    from compile_check.discover import import_target_module
+
+    fixture = FIXTURES / "backward_raises.py"
+    backend = import_target_module(str(fixture)).BACKEND
+    argv = [str(fixture), "--backends", f"eager,{backend}", "--color", "never"]
+
+    assert main([*argv, "--fail-on", "grad"]) == EXIT_FINDING
+    out = capsys.readouterr().out
+    assert "grad      yes      1 fail" in out
+    assert "the backward pass raised RuntimeError" in out
+    # The forward pass is bit-identical, so nothing else fired.
+    assert "numerics  no       pass" in out
+
+    assert main([*argv, "--fail-on", "numerics"]) == EXIT_OK
+    narrowed = capsys.readouterr().out
+    # Narrowing the exit rule never narrows what was checked: the finding is
+    # still in the report, it just does not decide the exit code.
+    assert "grad      no       1 fail" in narrowed
+
+
+def test_no_grad_says_the_check_was_switched_off(capsys):
+    # An oracle that was turned off must not read as an oracle that found
+    # nothing, which is the same rule the report applies to the graph oracle.
+    clean = main([str(FIXTURES / "mlp.py"), "--backends", "eager,aot_eager", "--color", "never"])
+    with_grad = capsys.readouterr().out
+    assert clean == EXIT_OK
+    assert "grad      yes      pass" in with_grad
+
+    code = main(
+        [
+            str(FIXTURES / "mlp.py"),
+            "--backends",
+            "eager,aot_eager",
+            "--no-grad",
+            "--color",
+            "never",
+        ]
+    )
+    out = capsys.readouterr().out
+
+    # info never fails a run, whatever --fail-on says.
+    assert code == EXIT_OK
+    assert "grad      yes      1 info" in out
+    assert "--no-grad switched the backward pass off" in out
+    assert "  run       backends eager, aot_eager   seed 0" in out
+    assert "grad off" in out
 
 
 def test_a_backend_nothing_registers_is_still_a_tool_error(tmp_path):

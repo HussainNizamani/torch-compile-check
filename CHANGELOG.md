@@ -66,6 +66,15 @@ All notable changes to this project are documented here. The format follows
 - The metadata oracle's `requires_grad` comparison reads the runner's record
   rather than the output clone. The clone is detached, so the field answered
   `False` on both sides of every real run and the check was vacuous.
+- The gradients oracle: one backward per lane on the deterministic scalar
+  reduction, then two comparisons. The set of tensors that received a gradient
+  must be identical, and a finding names the parameter; the gradients themselves
+  go through the numerics rule, so `--rtol` and `--atol` reach them unchanged. A
+  backward that raised in one lane and not the other is a fail on its own, and
+  `--no-grad` reports an `info` line rather than a clean grad row. Registered in
+  `ORACLES`, so `--fail-on grad` now decides an exit code.
+- `numerics.compare_tensors`: the value comparison as one reusable call, so a
+  gradient and an output are compared by the same code and the same tolerances.
 - Tooling: ruff lint and format, mypy strict over `src/`, pytest, pre-commit, a
   `Makefile`, and a GitHub Actions matrix over Python 3.10 to 3.13 and torch
   stable and nightly on CPU.

@@ -26,12 +26,19 @@ from __future__ import annotations
 import importlib
 import logging
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from compile_check.oracles.base import Finding, OracleConfig, Severity, align_outputs
 from compile_check.results import BackendResult
 
-__all__ = ["FALLBACK_TOLERANCES", "NumericsOracle", "resolve_tolerances"]
+__all__ = [
+    "FALLBACK_TOLERANCES",
+    "Mismatch",
+    "NumericsOracle",
+    "compare_tensors",
+    "resolve_tolerances",
+]
 
 log = logging.getLogger("compile_check")
 
@@ -76,6 +83,84 @@ def resolve_tolerances(torch: Any, dtypes: Sequence[Any], cfg: OracleConfig) -> 
     if cfg.atol is not None:
         atol = cfg.atol
     return rtol, atol
+
+
+@dataclass(frozen=True)
+class Mismatch:
+    """Why two tensors did not compare equal, in the words a report prints.
+
+    Not a :class:`~compile_check.oracles.base.Finding`: it carries no oracle
+    name, no backend, and no output index, because the caller is what knows
+    those. It is the value comparison's answer, and whichever oracle asked turns
+    it into a finding of its own.
+    """
+
+    message: str
+    """One line, ``assert_close``'s own words wherever it had any."""
+
+    details: dict[str, Any]
+    """The tolerances the decision was made with, and the two dtypes."""
+
+
+def compare_tensors(torch: Any, expected: Any, got: Any, cfg: OracleConfig) -> Mismatch | None:
+    """Compare two tensors under PLAN.md's numerics rule, or say why not.
+
+    The one place the rule lives, so that the grad oracle of M2-2 compares a
+    gradient exactly the way the numerics oracle compares an output: the same
+    per-dtype tolerances, the same ``--rtol`` and ``--atol`` overrides, dtype
+    and stride left to the metadata oracle, and a NaN in the same place on both
+    sides counted as agreement rather than as a mismatch.
+
+    ``assert_close`` writes a better mismatch message than anything built here
+    would: element counts, the greatest absolute and relative difference, and
+    where each occurs. It is used for its message, which is why the comparison
+    is a try/except rather than a boolean.
+
+    Args:
+        torch: the imported torch module.
+        expected: the reference tensor, from the eager lane.
+        got: the tensor under test.
+        cfg: the run's tolerances.
+
+    Returns:
+        ``None`` when the two agree within tolerance, or the :class:`Mismatch`
+        that says how they did not. A pair the comparison could not walk at all
+        is a mismatch too, with the error in its message: a value the tool could
+        not check must not read as a value that passed.
+    """
+    rtol, atol = resolve_tolerances(torch, (expected.dtype, got.dtype), cfg)
+    details: dict[str, Any] = {
+        "rtol": rtol,
+        "atol": atol,
+        "expected_dtype": str(expected.dtype),
+        "got_dtype": str(got.dtype),
+    }
+    try:
+        torch.testing.assert_close(
+            got,
+            expected,
+            rtol=rtol,
+            atol=atol,
+            # PLAN.md "numerics": NaN parity is its own finding in the numerics
+            # oracle, so here a NaN in the same place on both sides is agreement
+            # rather than a value mismatch.
+            equal_nan=True,
+            check_device=False,
+            # dtype and stride belong to the metadata oracle.
+            check_dtype=False,
+            check_stride=False,
+        )
+    except AssertionError as exc:
+        details["assert_close"] = str(exc)
+        return Mismatch(message=_one_line(str(exc)), details=details)
+    except Exception as exc:
+        # Not a mismatch: a meta tensor, a layout assert_close cannot walk.
+        details["error"] = f"{type(exc).__name__}: {exc}"
+        return Mismatch(
+            message=f"values could not be compared: {type(exc).__name__}: {_one_line(str(exc))}",
+            details=details,
+        )
+    return None
 
 
 def _default_tolerances(torch: Any, dtypes: Sequence[Any]) -> tuple[float, float]:
@@ -269,61 +354,16 @@ class NumericsOracle:
         backend: str,
         cfg: OracleConfig,
     ) -> list[Finding]:
-        """The value comparison itself, and the message it produces.
+        """One output leaf's values, as a finding or nothing.
 
-        ``assert_close`` writes a better mismatch message than anything built
-        here would: element counts, the greatest absolute and relative
-        difference, and where each occurs. It is used for its message, which is
-        why the comparison is a try/except rather than a boolean.
+        The rule itself is :func:`compare_tensors`, so that a gradient and an
+        output are compared by the same code; this turns its answer into a
+        finding that knows which output and which backend it belongs to.
         """
-        rtol, atol = resolve_tolerances(torch, (expected.dtype, got.dtype), cfg)
-        details: dict[str, Any] = {
-            "rtol": rtol,
-            "atol": atol,
-            "expected_dtype": str(expected.dtype),
-            "got_dtype": str(got.dtype),
-        }
-        try:
-            torch.testing.assert_close(
-                got,
-                expected,
-                rtol=rtol,
-                atol=atol,
-                # PLAN.md "numerics": NaN parity is checked above as its own
-                # finding, so here a NaN in the same place on both sides is
-                # agreement rather than a value mismatch.
-                equal_nan=True,
-                check_device=False,
-                # dtype and stride belong to the metadata oracle.
-                check_dtype=False,
-                check_stride=False,
-            )
-        except AssertionError as exc:
-            details["assert_close"] = str(exc)
-            return [
-                self._finding(
-                    index,
-                    backend,
-                    "fail",
-                    _one_line(str(exc)),
-                    details,
-                )
-            ]
-        except Exception as exc:
-            # Not a mismatch: a meta tensor, a layout assert_close cannot walk.
-            # Reported rather than swallowed, because an output the tool could
-            # not check must not read as an output that passed.
-            details["error"] = f"{type(exc).__name__}: {exc}"
-            return [
-                self._finding(
-                    index,
-                    backend,
-                    "fail",
-                    f"values could not be compared: {type(exc).__name__}: {_one_line(str(exc))}",
-                    details,
-                )
-            ]
-        return []
+        mismatch = compare_tensors(torch, expected, got, cfg)
+        if mismatch is None:
+            return []
+        return [self._finding(index, backend, "fail", mismatch.message, mismatch.details)]
 
     def _compare_fp64(
         self,

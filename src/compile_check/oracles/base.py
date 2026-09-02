@@ -82,6 +82,15 @@ class OracleConfig:
     atol: float | None = None
     """``--atol``: the same for the absolute tolerance."""
 
+    grad: bool = True
+    """Whether the run ran a backward pass at all, i.e. not ``--no-grad``.
+
+    The grad oracle needs to tell "no tensor in this run required a gradient"
+    from "the user switched the check off", and the records alone cannot: both
+    leave every lane with no gradients. Carried here so the second case can be
+    said out loud in the report rather than passing as a clean grad row.
+    """
+
     fp64: bool = False
     """``--fp64-oracle``: compare both worlds against an fp64 eager reference.
 

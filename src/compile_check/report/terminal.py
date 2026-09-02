@@ -278,7 +278,7 @@ def _checks(
         )
         lines.append(f"{oracle:<{name_width}}  {marker:<7}  {padded}".rstrip())
 
-    legend = ["", paint("pass = no finding   not yet = the oracle lands in M2 or M3", "dim")]
+    legend = ["", paint("pass = no finding   not yet = the oracle lands in M3", "dim")]
     if raised or reference_raised:
         legend.append(paint("-    = the lane raised, so there was nothing to compare", "dim"))
     return _section("checks", lines + legend, paint)
