@@ -12,28 +12,39 @@ Python 3.10.12, torch `2.15.0.dev20260901+cpu`, git
 `TORCHINDUCTOR_FORCE_DISABLE_CACHES=1`. This matches the CEO's independent
 ashburn run bit for bit. No other architecture or accelerator was run.
 
-**Environment-integrity note, earlier draft used a contaminated venv.** An
-earlier pass verified against a pre-existing `/tmp/pruefer_venv` (torch
-`2.15.0.dev20260831+cpu`) and got a false GREEN on
-`alias_slice_scatter_copyback.py` (issue 195451). Root cause: that venv's
-`torch/_inductor/fx_passes/reinplace.py` had a hand-patched
-`should_reinplace_scatter()` with an escape-check guard (function name
-`_scatter_result_escapes_graph`) that does not exist in the official
+**Environment-integrity note, resolved: the "contamination" was our own
+fix-in-progress for 195451, not a rogue patch.** An earlier pass verified
+against a pre-existing `/tmp/pruefer_venv` (torch `2.15.0.dev20260831+cpu`)
+and got a GREEN on `alias_slice_scatter_copyback.py` where every unpatched
+nightly checked (0824, 0831, 0901) is RED. That venv's
+`torch/_inductor/fx_passes/reinplace.py` has a hand-applied
+`should_reinplace_scatter()` escape-check guard (function
+`_scatter_result_escapes_graph`) -- confirmed absent from official
 pytorch/pytorch source at the exact commit that venv's own
-`torch.version.git_version` reported (confirmed by diffing the installed
-file against `gh api repos/pytorch/pytorch/contents/...?ref=<commit>`), and
-does not exist anywhere in current pytorch/pytorch main either (`gh api
-search/code` found zero matches for the guard's function name). Every other
-file spot-checked in that venv -- the files touched by the fixes behind the
-other four cases -- matched official source exactly; only this one file was
-altered. All five cases below were re-run in the clean venv; only case 1's
-RED/GREEN result changed (GREEN to RED). Do not reuse `/tmp/pruefer_venv`
-for verification without first diffing its inductor/functorch sources
-against the official repository at its reported commit.
+`torch.version.git_version` reports, and absent from current
+pytorch/pytorch main (`gh api search/code` found zero matches), by diffing
+the installed file against `gh api
+repos/pytorch/pytorch/contents/...?ref=<commit>`. This is the same bug, the
+same author, and the same day as the open fix
+[PR #195484](https://github.com/pytorch/pytorch/pull/195484) -- but it is
+NOT textually identical to that PR's current diff (different function name,
+different control-flow placement inside `should_reinplace_scatter`,
+recursive vs. iterative traversal); most likely an earlier local iteration
+of the same fix, applied directly to that venv's site-packages rather than
+landed as a commit. So the GREEN was real: reinplacing genuinely does not
+fire with that guard in the tree. It reflects "the fix, in some form, is
+present" rather than "the bug is absent upstream." Every other file spot-
+checked in that venv -- the files touched by the fixes behind the other
+four cases -- matched official source exactly; only this one file carried a
+local patch. All five cases below were re-run in a clean venv (guard not
+present) to get the upstream-accurate baseline; only case 1's result
+changed there (GREEN to RED, matching every unpatched nightly). Verification
+venvs should be created fresh per mission and removed after -- a patched
+venv should not outlive the mission that patched it.
 
 | Case | Issue | PR | Status upstream | Oracle | First diverging backend | RED on (torch versions run) | GREEN on (torch versions run) |
 |---|---|---|---|---|---|---|---|
-| `alias_slice_scatter_copyback.py` | [#195451](https://github.com/pytorch/pytorch/issues/195451) | [#195484](https://github.com/pytorch/pytorch/pull/195484) (open) | open, unmerged | alias | not established (only `inductor` run; `--backend aot_eager` available but not separately confirmed against this build) | 2.15.0.dev20260901+cpu, aarch64, CPU (clean venv, default `inductor`) | not run |
+| `alias_slice_scatter_copyback.py` | [#195451](https://github.com/pytorch/pytorch/issues/195451) | [#195484](https://github.com/pytorch/pytorch/pull/195484) (open, unmerged; an earlier local iteration of this fix is what caused the GREEN discussed in the note above) | open, unmerged upstream | alias | not established (only `inductor` run; `--backend aot_eager` available but not separately confirmed against this build) | 2.15.0.dev20260901+cpu, aarch64, CPU (clean venv, default `inductor`), plus 0824 and 0831 nightlies per the CEO's and Baumeister's cross-checks | not run on any unpatched build; GREEN only observed with the local fix-iteration guard in the tree (see note) |
 | `alias_noop_view_identity.py` | [#191449](https://github.com/pytorch/pytorch/issues/191449) | [#191844](https://github.com/pytorch/pytorch/pull/191844) (merged 2026-09-02T03:45:57Z, commit `a3586f0018`) | merged 2026-09-02 | alias | `inductor` (fix location: AOTAutograd -- see note below on why those differ) | 2.15.0.dev20260901+cpu, aarch64, CPU (clean venv, default `inductor`) -- this build predates the 03:45 UTC merge | 2.15.0.dev20260901+cpu, aarch64, CPU (`--backend aot_eager` only) |
 | `dtype_int8_matmul_promotion.py` | [#191308](https://github.com/pytorch/pytorch/issues/191308) | none found | open, unfixed | metadata (dtype) | `inductor` | 2.15.0.dev20260901+cpu, aarch64, CPU (clean venv, default `inductor`) | 2.15.0.dev20260901+cpu, aarch64, CPU (`--backend aot_eager`) |
 | `distributions_validation_branch.py` | [#194593](https://github.com/pytorch/pytorch/issues/194593) (sibling [#194596](https://github.com/pytorch/pytorch/issues/194596)) | none found | open, unfixed | graph (fullgraph capturability) | not established (both `inductor` and `aot_eager` raised under `fullgraph=True`) | 2.15.0.dev20260901+cpu, aarch64, CPU (clean venv, `fullgraph=True`, `inductor` and `--backend aot_eager`) | 2.15.0.dev20260901+cpu, aarch64, CPU (default `fullgraph=False` mode, context probe only, not a separate case file) |
@@ -41,9 +52,13 @@ against the official repository at its reported commit.
 
 ## Notes on surprises (not predicted by the slice brief)
 
-- **195451 IS RED, as the brief expected** -- once run against a clean
-  install. See the environment-integrity note above for why an earlier pass
-  said GREEN. PR 195484 (the fix) is still open, unmerged.
+- **195451 IS RED, as the brief expected, on every unpatched nightly
+  checked (0824, 0831, 0901).** The earlier GREEN pass wasn't a false
+  negative against an absent bug -- it was a true positive against a
+  present, not-yet-landed fix: an earlier local iteration of PR 195484 had
+  been applied directly to that venv's `reinplace.py`. See the
+  environment-integrity note above. PR 195484 itself is still open,
+  unmerged upstream.
 - **191449: first diverging backend is `inductor`, fix location is
   AOTAutograd -- confirmed, and these are two different things, not a
   contradiction.** Re-run on the 0901 nightly: both MWEs (resize-on-view and

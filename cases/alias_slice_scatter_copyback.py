@@ -28,23 +28,31 @@ nothing else on top). PR 195484 (the fix) was still open, unmerged, as of
 
 An earlier verification pass on this same box, against a torch
 2.15.0.dev20260831+cpu install in a pre-existing venv
-(`/tmp/pruefer_venv`), came back GREEN on this exact case. That was
-environment contamination, not a real result: that venv's
-`torch/_inductor/fx_passes/reinplace.py` had a hand-patched
-`should_reinplace_scatter()` (a `_scatter_result_escapes_graph()` guard)
-that does not exist in the official pytorch/pytorch source at the exact
-commit that venv's own `torch.version.git_version` reported, confirmed by
-diffing the installed file against `gh api
-repos/pytorch/pytorch/contents/...?ref=<that commit>` -- and that guard
-string does not appear anywhere in current pytorch/pytorch main either
-(`gh api search/code` found zero matches). Every other file spot-checked in
-that venv (the files touched by the other four cases' relevant fixes)
-matched official source exactly; only this one file was altered. Re-running
-in a fresh venv, with no other change, reproduces RED and matches the
-issue and the CEO's independent ashburn run on the same build
-(2.15.0.dev20260901+cpu, git 279f79e) bit for bit. Do not reuse
-`/tmp/pruefer_venv` for verification without first diffing its inductor/
-functorch sources against the official repository at its reported commit.
+(`/tmp/pruefer_venv`), came back GREEN on this exact case, where every
+unpatched nightly checked (0824, 0831, 0901) is RED. Root cause: that
+venv's `torch/_inductor/fx_passes/reinplace.py` had a hand-applied
+`should_reinplace_scatter()` escape-check guard
+(`_scatter_result_escapes_graph`), confirmed absent from official
+pytorch/pytorch source at the exact commit that venv's own
+`torch.version.git_version` reported (diffed against `gh api
+repos/pytorch/pytorch/contents/...?ref=<that commit>`) and absent from
+current pytorch/pytorch main (`gh api search/code`, zero matches). This
+turned out to be the mission's own fix-in-progress for this issue -- same
+bug, same author, same day as the open PR 195484 -- but not textually
+identical to that PR's current diff (different function name, different
+control-flow placement, recursive vs. iterative). Most likely an earlier
+local iteration of the fix applied directly to that venv's site-packages
+rather than landed as a commit. So the GREEN was real in the sense that
+reinplacing genuinely did not fire with that guard present; it reflects
+"the fix, in some form, is in the tree" rather than "the bug is absent
+upstream." Every other file spot-checked in that venv (the files touched
+by the other four cases' relevant fixes) matched official source exactly;
+only this one file carried a local patch. Re-running in a clean venv (guard
+not present), with no other change, reproduces RED and matches the issue
+and the CEO's independent ashburn run on the same build
+(2.15.0.dev20260901+cpu, git 279f79e) bit for bit. Verification venvs
+should be created fresh per mission and removed after; a patched venv
+should not outlive the mission that patched it.
 
 An in-region `.clone()` on the returned value does not protect against this;
 the bug is that the returned *object* aliases the input at the Python level,
