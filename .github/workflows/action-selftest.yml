@@ -14,10 +14,17 @@ on:
     paths:
       - "action/**"
       - ".github/workflows/action-selftest.yml"
+      # The two targets the jobs below run through the action. They are what
+      # the baseline round trip and the seeded regression assert on, so a
+      # change to either has to re-run this workflow.
+      - "cases/dtype_promotion.py"
+      - "tests/fixtures/graph_break.py"
   pull_request:
     paths:
       - "action/**"
       - ".github/workflows/action-selftest.yml"
+      - "cases/dtype_promotion.py"
+      - "tests/fixtures/graph_break.py"
   workflow_dispatch:
 
 concurrency:
@@ -41,7 +48,7 @@ jobs:
           # ref: main would install from GitHub instead of this checkout's
           # working copy, which defeats the point of a self-test on a PR
           # branch; pin the ref to the commit under test instead.
-          ref: ${{ github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           targets: "tests/fixtures/mlp.py"
           allow-unimplemented: "true"
 
@@ -75,6 +82,180 @@ jobs:
       - name: --run-only against the reference fixture
         run: compile-check tests/fixtures/mlp.py --run-only
 
+  selftest-baseline:
+    # The baseline round trip of PLAN.md "GitHub Action", driven through the
+    # action rather than through the CLI: one run writes the graph-health
+    # baseline for a target that breaks the graph on purpose
+    # (tests/fixtures/graph_break.py, two breaks), the next run is handed that
+    # same file back and has to come out clean. The round trip is only worth
+    # anything if the two runs differ, so both are asserted: the write run,
+    # which has no baseline, must report the breaks, and the read run must
+    # report none of them.
+    #
+    # aot_eager is the only compiled lane here on purpose. The graph oracle
+    # reads torch._dynamo.explain, which is the same for every backend on the
+    # ladder, and skipping inductor takes minutes of codegen off a job whose
+    # subject is a JSON file.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write a baseline from the graph-break fixture
+        id: write
+        uses: ./action
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          targets: "tests/fixtures/graph_break.py"
+          backends: "eager,aot_eager"
+          fail-on: "numerics,alias,metadata,grad,graph"
+          write-baseline: ".compile-check/graph-break.json"
+          json-out: "baseline-write.json"
+          # The one place `cache: true` is exercised in CI. It is safe to put
+          # it on this run and nowhere else: what this job measures is graph
+          # health, which comes from Dynamo's tracing and not from a cached
+          # inductor artifact, so allowing the compile caches cannot change
+          # the numbers the baseline is made of. The assertion below reads the
+          # report's own record of which cache mode was in force.
+          cache: "true"
+
+      - name: Assert the write run produced a usable baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.write.outputs.exit-code }}" != "0" ]; then
+            echo "the write-baseline run should stay clean, got exit-code ${{ steps.write.outputs.exit-code }}" >&2
+            exit 1
+          fi
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          baseline = json.loads(Path(".compile-check/graph-break.json").read_text())
+          if not baseline:
+              raise SystemExit("write-baseline produced an empty file")
+          for lane, entry in baseline.items():
+              if entry["graph_break_count"] < 1 or not entry["break_reasons"]:
+                  raise SystemExit(f"lane {lane} recorded no breaks: {entry}")
+
+          report = json.loads(Path("baseline-write.1.json").read_text())
+          caches = report["environment"]["inductor_force_disable_caches"]
+          if caches is not False:
+              raise SystemExit(f"cache: true did not reach --allow-caches: {caches!r}")
+          breaks = [f for f in report["findings"] if f["oracle"] == "graph"]
+          if not breaks:
+              raise SystemExit("a run with no baseline should have reported the fixture's breaks")
+          print(f"baseline lanes {sorted(baseline)}, {len(breaks)} graph findings without it")
+          PY
+
+      - name: Run the same target against the baseline it just wrote
+        id: read
+        uses: ./action
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          targets: "tests/fixtures/graph_break.py"
+          backends: "eager,aot_eager"
+          fail-on: "numerics,alias,metadata,grad,graph"
+          baseline: ".compile-check/graph-break.json"
+          json-out: "baseline-read.json"
+
+      - name: Assert the baseline silenced the known breaks
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.read.outputs.exit-code }}" != "0" ]; then
+            echo "expected a clean run against the baseline, got exit-code ${{ steps.read.outputs.exit-code }}" >&2
+            exit 1
+          fi
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("baseline-read.1.json").read_text())
+          if report["run"]["baseline"] != ".compile-check/graph-break.json":
+              raise SystemExit(f"the baseline input did not reach --baseline: {report['run']}")
+          breaks = [f for f in report["findings"] if f["oracle"] == "graph"]
+          if breaks:
+              raise SystemExit(f"the baseline did not silence the known breaks: {breaks}")
+          caches = report["environment"]["inductor_force_disable_caches"]
+          if caches is not True:
+              raise SystemExit(f"the default cache: false should force caches off, got {caches!r}")
+          print("baseline round trip clean, and the default run still measures the current compiler")
+          PY
+
+  selftest-seeded-regression:
+    # PLAN.md M4 definition of done: "the action ... fails correctly on a
+    # seeded regression". The seed is cases/dtype_promotion.py, the 191308
+    # int8-matmul case, run with fail-on: metadata -- the oracle that catches
+    # it. The action is expected to FAIL here, so the step carries
+    # continue-on-error and the next step asserts that it did: a job that went
+    # green because the action never noticed would be the exact failure this
+    # tests for.
+    #
+    # minimize/budget ride along because this is the only job with a real
+    # finding to shrink, which is the only state in which either input does
+    # anything. A budget passed to a flag the CLI does not have would exit 2
+    # rather than 1, so asserting exit 1 asserts the wiring of both.
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run the seeded regression through the action
+        id: seeded
+        continue-on-error: true
+        uses: ./action
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          targets: "cases/dtype_promotion.py"
+          fail-on: "metadata"
+          minimize: "true"
+          budget: "120"
+          json-out: "seeded.json"
+
+      - name: Assert the action failed the job on the seeded regression
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${{ steps.seeded.outcome }}" != "failure" ]; then
+            echo "::error::the action did not fail on the seeded regression (outcome ${{ steps.seeded.outcome }})" >&2
+            exit 1
+          fi
+
+          # The composite action's own output is reported when it survives a
+          # failing inner step, and skipped when it does not; the JSON below is
+          # the assertion that does not depend on which.
+          observed="${{ steps.seeded.outputs.exit-code }}"
+          echo "exit-code output: '${observed}'"
+          if [ -n "$observed" ] && [ "$observed" != "1" ]; then
+            echo "::error::expected exit-code 1 from the action, got '${observed}'" >&2
+            exit 1
+          fi
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("seeded.1.json").read_text())
+          if report["exit_code"] != 1:
+              raise SystemExit(f"expected exit_code 1 in the report, got {report['exit_code']}")
+          seeded = [
+              f
+              for f in report["findings"]
+              if f["oracle"] == "metadata" and f["severity"] == "fail"
+          ]
+          if not seeded:
+              raise SystemExit(
+                  "no metadata failure: the 191308 dtype promotion did not reproduce on this "
+                  f"torch ({report['environment']['torch_version']}), so the seed is gone and "
+                  "the case file needs a new one"
+              )
+          if not isinstance(report["minimized"], dict):
+              raise SystemExit(f"minimize: true did not reach --minimize: {report['minimized']!r}")
+          print(f"seeded regression caught: {seeded[0]['message']}")
+          PY
+
   selftest-git-source:
     # A second self-test job, deliberately separate from `selftest` above:
     # that job's default `source: auto` resolves to `local` (the action runs
@@ -102,6 +283,9 @@ jobs:
         uses: ./action
         with:
           source: git
-          ref: ${{ github.sha }}
+          # github.sha on a pull_request event is the merge commit, which does
+          # not exist in the fork or branch pip would clone from; the PR head
+          # is the commit that does (PR #11 follow-up).
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           targets: "tests/fixtures/mlp.py"
           allow-unimplemented: "true"
