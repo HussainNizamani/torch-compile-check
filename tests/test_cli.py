@@ -22,7 +22,7 @@ from compile_check.env import PROBED_APIS
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-STUB_MODULES = [
+PACKAGE_MODULES = [
     "compile_check.cli",
     "compile_check.discover",
     "compile_check.env",
@@ -39,6 +39,7 @@ STUB_MODULES = [
     "compile_check.report.markdown",
     "compile_check.report.pytest_case",
     "compile_check.report.terminal",
+    "compile_check.results",
     "compile_check.runner",
 ]
 
@@ -169,20 +170,18 @@ def test_bad_device_is_a_tool_error():
 
 
 def test_every_module_imports():
-    for name in STUB_MODULES:
+    for name in PACKAGE_MODULES:
         assert importlib.import_module(name) is not None
 
 
 def test_stubs_raise_not_implemented():
-    from compile_check import discover, localize, minimize, runner
+    # discover.py and runner.py landed in M1-1 and are covered by their own
+    # test modules; what is left below is what M1-2 and M1-3 still owe.
+    from compile_check import localize, minimize
     from compile_check.oracles import alias, grad, graph, metadata, numerics
     from compile_check.report import json as json_report
     from compile_check.report import markdown, pytest_case, terminal
 
-    with pytest.raises(NotImplementedError):
-        discover.resolve(Path("model.py"))
-    with pytest.raises(NotImplementedError):
-        runner.run_backend(None, None, "eager")
     with pytest.raises(NotImplementedError):
         localize.implicated_stage("inductor")
     with pytest.raises(NotImplementedError):
