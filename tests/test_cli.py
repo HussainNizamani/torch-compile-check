@@ -29,6 +29,7 @@ from compile_check.results import BackendResult, RunSet
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
+CASES = REPO_ROOT / "cases"
 
 PACKAGE_MODULES = [
     "compile_check.cli",
@@ -450,6 +451,28 @@ def test_the_main_path_reports_a_clean_model_and_exits_zero(capsys):
     assert "machine   " in out
     assert "caches    disabled (force_disable_caches=True)" in out
     assert "\033[" not in out
+
+
+def test_the_tool_reports_the_copyback_alias_case_end_to_end(capsys):
+    # The whole tool on a corpus case: discovery, three lanes, the oracles, the
+    # stage verdict, the exit code. PLAN.md "alias" names 195451 as the bug this
+    # oracle exists for, and the case returns identical values in both worlds,
+    # so nothing but the alias oracle can catch it.
+    code = main([str(CASES / "alias_copyback.py"), "--color", "never"])
+    out = capsys.readouterr().out
+
+    if code == EXIT_OK:  # pragma: no cover - depends on the torch build
+        assert "clean:" in out
+        pytest.skip("this torch does not reproduce 195451, so the case is green here")
+
+    assert code == EXIT_FINDING
+    assert "alias  (1 fail)" in out
+    assert "inductor returned input[0] itself as output[0]" in out
+    # Both relations travel with the finding, so the claim can be checked.
+    assert "eager_relation" in out
+    assert "compiled_relation" in out
+    # aot_eager agrees with eager, which is what makes the verdict inductor's.
+    assert "first diverges at inductor, which implicates inductor lowering/codegen" in out
 
 
 def test_the_main_path_reports_a_broken_model_as_the_model_and_exits_two(capsys):
