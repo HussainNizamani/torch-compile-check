@@ -225,10 +225,14 @@ def localize(runset: RunSet, findings: Sequence[Finding] = ()) -> StageVerdict:
 
     first = next((entry.backend for entry in summaries if entry.diverged), None)
     if first is None:
+        compared = len(summaries) - 1
         return StageVerdict(
             stage=CLEAN,
             first_divergent_backend=None,
-            summary=f"clean: no backend diverged from eager across {len(summaries) - 1} lanes",
+            summary=(
+                f"clean: no backend diverged from eager across "
+                f"{compared} lane{'' if compared == 1 else 's'}"
+            ),
             note=None,
             backends=summaries,
         )
