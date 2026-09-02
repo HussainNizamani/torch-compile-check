@@ -12,6 +12,7 @@ import pytest
 
 from compile_check import __version__
 from compile_check.localize import localize
+from compile_check.minimize import Kept, Minimization, Shrink, Stub
 from compile_check.oracles import Finding
 from compile_check.report.markdown import render, title
 from compile_check.results import BackendResult, CapturedException, RunSet, TargetSource
@@ -94,8 +95,8 @@ which implicates inductor lowering/codegen.
 
 ## Repro
 
-The target's own source, reduced to the statements the entry point and the inputs need. It is not \
-a *minimized* repro: the minimizer lands in M3-3.
+The target's own source, reduced to the statements the entry point and the inputs need. It is the \
+whole case: run compile-check again with `--minimize` to shrink it.
 
 ```python
 from __future__ import annotations
@@ -340,3 +341,81 @@ def test_the_command_block_carries_the_flags_that_change_the_run(runset):
         "$ compile-check cases/dtype_promotion.py --backends eager,inductor --fullgraph "
         "--dynamic --no-grad --share-module --seed 7" in text
     )
+
+
+# --- the minimized section --------------------------------------------------
+
+
+MINIMIZED = Minimization(
+    finding=FINDING,
+    reproduced=True,
+    shrinks=(Shrink(index=0, before=(8, 4), after=(1, 4)),),
+    stubs=(Stub(path="net.0", module="Linear"),),
+    kept=(Kept(path="net.1", module="ReLU", reason="the finding did not survive"),),
+    steps=4,
+    seconds=1.25,
+    handoff="TORCHDYNAMO_REPRO_AFTER=aot TORCHDYNAMO_REPRO_LEVEL=4 takes it further.",
+)
+
+
+def section(text: str, title: str) -> str:
+    """One `##` section of a draft, without the ones around it."""
+    parts = text.split(f"\n## {title}\n")
+    assert len(parts) == 2, f"expected exactly one {title!r} section"
+    return parts[1].split("\n## ")[0]
+
+
+def test_a_draft_without_the_minimizer_says_the_repro_is_the_whole_case(runset):
+    text = draft(runset)
+    assert "It is the whole case: run compile-check again with `--minimize` to shrink it." in text
+    assert "## Minimized" not in text
+
+
+def test_a_minimized_draft_lists_what_was_removed(runset):
+    text = draft(runset, minimized=MINIMIZED)
+    assert (
+        "It is the whole case; the **Minimized** section below says which parts of it the "
+        "finding does not need." in text
+    )
+    assert section(text, "Minimized").splitlines()[1:6] == [
+        "1 child module replaced with torch.nn.Identity() and 1 input shrunk.",
+        "",
+        "- input leaf 0: `(8, 4)` -> `(1, 4)`",
+        "- `net.0` (Linear) replaced with `torch.nn.Identity()`",
+        "- kept `net.1` (ReLU): the finding did not survive",
+    ]
+
+
+def test_the_minimized_section_carries_the_minifier_handoff(runset):
+    assert "TORCHDYNAMO_REPRO_AFTER=aot" in section(draft(runset, minimized=MINIMIZED), "Minimized")
+
+
+def test_a_partial_minimization_is_marked_partial_in_the_draft(runset):
+    text = draft(
+        runset,
+        minimized=Minimization(
+            finding=FINDING,
+            reproduced=True,
+            stubs=(Stub(path="net.0", module="Linear"),),
+            partial=True,
+            partial_reason="the --budget of 5s ran out after 2 candidate re-runs",
+            handoff="handed off",
+        ),
+    )
+    assert (
+        "This reduction is **partial**: the --budget of 5s ran out after 2 candidate re-runs."
+        in section(text, "Minimized")
+    )
+
+
+def test_a_run_the_minimizer_had_nothing_to_do_on_says_so_in_the_repro_note(runset):
+    text = draft(runset, minimized=Minimization.not_attempted("no fail-severity finding"))
+    assert (
+        "It is the whole case: `--minimize` nothing to minimize: no fail-severity finding." in text
+    )
+    assert "## Minimized" not in text
+
+
+def test_the_command_block_repeats_the_minimize_flag(runset):
+    assert "--minimize" in section(draft(runset, minimized=MINIMIZED), "How this was produced")
+    assert "--minimize" not in section(draft(runset), "How this was produced")

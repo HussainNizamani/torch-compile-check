@@ -16,6 +16,7 @@ import pytest
 
 from compile_check import __version__
 from compile_check.localize import localize
+from compile_check.minimize import Kept, Minimization, Shrink, Stub
 from compile_check.oracles import Finding
 from compile_check.report.json import SCHEMA_VERSION, build, dump, validate
 from compile_check.results import (
@@ -333,3 +334,109 @@ def test_the_artifact_carries_no_timestamp(runset, tmp_path):
     assert "timestamp" not in text
     assert "generated_at" not in text
     assert Path(path).exists()
+
+
+# --- the minimized section (schema 2) ---------------------------------------
+
+
+MINIMIZED = Minimization(
+    finding=FINDING,
+    reproduced=True,
+    shrinks=(Shrink(index=0, before=(8, 4), after=(1, 4)),),
+    stubs=(Stub(path="net.0", module="Linear"),),
+    kept=(Kept(path="net.1", module="ReLU", reason="the finding did not survive"),),
+    notes=("a note",),
+    steps=4,
+    seconds=1.25,
+    partial=True,
+    partial_reason="the --budget of 5s ran out after 4 candidate re-runs",
+    handoff="TORCHDYNAMO_REPRO_AFTER=aot TORCHDYNAMO_REPRO_LEVEL=4",
+)
+
+
+def test_the_schema_version_is_two_because_minimized_was_added():
+    # PLAN.md "Reports": the integer is bumped on any incompatible field
+    # change, and a v1 document has no `minimized` key at all.
+    assert SCHEMA_VERSION == 2
+
+
+def test_a_run_without_the_minimizer_writes_null_rather_than_an_empty_record(runset):
+    built = document(runset)
+    assert built["minimized"] is None
+    assert validate(built) == []
+
+
+def test_a_minimized_run_carries_every_documented_field(runset):
+    built = document(runset, minimized=MINIMIZED)
+    assert validate(built) == []
+
+    minimized = built["minimized"]
+    assert minimized["attempted"] is True
+    assert minimized["reason"] is None
+    assert minimized["reproduced"] is True
+    assert minimized["changed"] is True
+    assert minimized["finding"] == {
+        "oracle": "metadata",
+        "backend": "inductor",
+        "output_index": 0,
+        "severity": "fail",
+        "field": "dtype",
+    }
+    assert minimized["shrinks"] == [{"index": 0, "before": [8, 4], "after": [1, 4]}]
+    assert minimized["stubs"] == [{"path": "net.0", "module": "Linear"}]
+    assert minimized["kept"] == [
+        {"path": "net.1", "module": "ReLU", "reason": "the finding did not survive"}
+    ]
+    assert minimized["notes"] == ["a note"]
+    assert minimized["steps"] == 4
+    assert minimized["seconds"] == 1.25
+    assert minimized["partial"] is True
+    assert minimized["partial_reason"].startswith("the --budget of 5s ran out")
+    assert "TORCHDYNAMO_REPRO_AFTER=aot" in minimized["handoff"]
+
+
+def test_a_run_the_minimizer_had_nothing_to_do_on_is_not_null(runset):
+    # The distinction the field exists to keep: null is "not run", and this is
+    # "run, and there was nothing to work from".
+    built = document(runset, minimized=Minimization.not_attempted("no fail-severity finding"))
+    assert validate(built) == []
+    assert built["minimized"]["attempted"] is False
+    assert built["minimized"]["finding"] is None
+    assert built["minimized"]["reason"] == "no fail-severity finding"
+
+
+def test_the_minimized_section_round_trips_through_json(runset, tmp_path):
+    path = tmp_path / "out.json"
+    dump(document(runset, minimized=MINIMIZED), path)
+    reloaded = json.loads(path.read_text(encoding="utf-8"))
+    assert reloaded["minimized"] == document(runset, minimized=MINIMIZED)["minimized"]
+
+
+@pytest.mark.parametrize(
+    ("mutate", "expected"),
+    [
+        (lambda m: m.pop("stubs"), "minimized.stubs is missing"),
+        (lambda m: m.update(steps="4"), "minimized.steps is a string, expected integer"),
+        (lambda m: m.update(partial=None), "minimized.partial is a null, expected boolean"),
+        (
+            lambda m: m["stubs"].append({"path": "x"}),
+            "minimized.stubs[1].module is missing",
+        ),
+        (
+            lambda m: m["finding"].update(oracle=2),
+            "minimized.finding.oracle is a integer, expected string",
+        ),
+    ],
+)
+def test_a_broken_minimized_section_is_reported_field_by_field(runset, mutate, expected):
+    built = document(runset, minimized=MINIMIZED)
+    mutate(built["minimized"])
+    assert expected in validate(built)
+
+
+def test_a_document_without_the_minimized_key_is_a_version_one_document(runset):
+    # What the bump is for: a v1 artifact fed to this build's validator is
+    # rejected by name rather than silently read as a run with no minimizer.
+    built = document(runset)
+    del built["minimized"]
+    assert "minimized is missing" in validate(built)

@@ -16,6 +16,7 @@ import pytest
 
 from compile_check import __version__
 from compile_check.localize import localize
+from compile_check.minimize import Kept, Minimization, Shrink, Stub
 from compile_check.oracles import Finding
 from compile_check.report.terminal import DEFAULT_MAX_FINDINGS, render
 from compile_check.results import BackendResult, CapturedException, GraphBreak, GraphHealth, RunSet
@@ -158,8 +159,8 @@ stage
   clean: no backend diverged from eager across 2 lanes
 
 next
-  run with --json to save the result, --md for an issue draft, and --emit-test for a regression
-  test (the minimizer lands in M3-3)"""
+  run with --json to save the result, --md for an issue draft, --emit-test for a regression test,
+  and --minimize to shrink the case first"""
 
 
 DIVERGENT_REPORT = f"""\
@@ -210,8 +211,8 @@ stage
   that is where the divergence becomes observable, not necessarily where the fix belongs
 
 next
-  run with --json to save the result, --md for an issue draft, and --emit-test for a regression
-  test (the minimizer lands in M3-3)"""
+  run with --json to save the result, --md for an issue draft, --emit-test for a regression test,
+  and --minimize to shrink the case first"""
 
 
 def test_a_clean_run_renders_exactly_this(runset):
@@ -441,3 +442,155 @@ def test_a_negative_cap_never_reports_more_hidden_than_exist(runset, findings):
     assert "[fail]" not in report
     assert "2 more metadata findings not shown" in report
     assert "1 more numerics finding not shown" in report
+
+
+# --- the minimized block ----------------------------------------------------
+
+
+MINIMIZED = Minimization(
+    finding=Finding(
+        oracle="numerics",
+        backend="inductor",
+        output_index=0,
+        severity="fail",
+        message="Tensor-likes are not close!",
+        details={"rtol": 1.3e-6, "atol": 1e-5},
+    ),
+    reproduced=True,
+    shrinks=(Shrink(index=0, before=(8, 4), after=(1, 4)),),
+    stubs=(Stub(path="net.0", module="Linear"),),
+    kept=(
+        Kept(
+            path="net.1",
+            module="ReLU",
+            reason="the finding did not survive the replacement, so it lives in here",
+        ),
+    ),
+    steps=4,
+    seconds=1.25,
+    handoff="TORCHDYNAMO_REPRO_AFTER=aot TORCHDYNAMO_REPRO_LEVEL=4 takes it further.",
+)
+
+
+MINIMIZED_BLOCK = """\
+minimized
+  finding   [fail] numerics inductor output[0]
+  inputs    leaf 0  (8, 4) -> (1, 4)
+  model     net.0 (Linear) -> torch.nn.Identity()
+            kept net.1 (ReLU): the finding did not survive the replacement, so it lives in here
+  cost      4 candidate re-runs in 1.2s
+  minifier  TORCHDYNAMO_REPRO_AFTER=aot TORCHDYNAMO_REPRO_LEVEL=4 takes it further."""
+
+
+def block(report: str, title: str) -> str:
+    """One titled block of a report, without the ones around it."""
+    blocks = [part for part in strip(report).split("\n\n") if part.startswith(f"{title}\n")]
+    assert len(blocks) == 1, f"expected exactly one {title!r} block"
+    return blocks[0]
+
+
+def test_no_minimized_block_when_the_minimizer_was_not_run(runset):
+    # "not asked for" and "asked and found nothing" must not read alike, so the
+    # block is absent rather than empty.
+    report = strip(render(runset, [], localize(runset, [])))
+    assert "\nminimized\n" not in report
+    assert "--minimize to shrink the case first" in report
+
+
+def test_a_run_with_nothing_to_minimize_still_gets_the_block(runset):
+    report = render(
+        runset,
+        [],
+        localize(runset, []),
+        minimized=Minimization.not_attempted("this run has no fail-severity finding"),
+    )
+    assert block(report, "minimized") == (
+        "minimized\n  nothing to minimize: this run has no fail-severity finding"
+    )
+
+
+def test_the_minimized_block_renders_exactly_this(runset):
+    report = render(runset, [], localize(runset, []), minimized=MINIMIZED)
+    assert block(report, "minimized") == MINIMIZED_BLOCK
+
+
+def test_the_block_sits_between_the_findings_and_the_verdict(runset):
+    report = strip(render(runset, [], localize(runset, []), minimized=MINIMIZED))
+    assert report.index("\nfindings\n") < report.index("\nminimized\n") < report.index("\nstage\n")
+
+
+def test_a_partial_minimization_says_the_word(runset):
+    report = block(
+        render(
+            runset,
+            [],
+            localize(runset, []),
+            minimized=Minimization(
+                finding=MINIMIZED.finding,
+                reproduced=True,
+                steps=2,
+                partial=True,
+                partial_reason="the --budget of 5s ran out after 2 candidate re-runs",
+                handoff="handed off",
+            ),
+        ),
+        "minimized",
+    )
+    assert "partial   the --budget of 5s ran out after 2 candidate re-runs, so this result is" in (
+        report
+    )
+    assert (
+        "so this result is partial: what is left still reproduces, and there may be more to "
+        "remove" in " ".join(report.split())
+    )
+
+
+def test_a_control_that_did_not_reproduce_shows_the_note_and_no_reduction(runset):
+    report = block(
+        render(
+            runset,
+            [],
+            localize(runset, []),
+            minimized=Minimization(
+                finding=MINIMIZED.finding,
+                reproduced=False,
+                notes=("the finding did not reproduce on a re-run of the unchanged target",),
+                handoff="handed off",
+            ),
+        ),
+        "minimized",
+    )
+    assert "control   the finding did not reproduce on a re-run of the unchanged target" in report
+    assert "inputs" not in report
+    assert "model" not in report
+
+
+def test_the_next_steps_line_changes_once_the_minimizer_has_run(runset):
+    report = strip(render(runset, [], localize(runset, []), minimized=MINIMIZED))
+    assert "--budget SECONDS bounds the minimizer" in report
+    assert "--minimize to shrink the case first" not in report
+
+
+def test_a_long_handoff_note_wraps_under_its_label_and_keeps_the_variables(runset):
+    report = block(
+        render(
+            runset,
+            [],
+            localize(runset, []),
+            minimized=Minimization(
+                finding=MINIMIZED.finding,
+                reproduced=True,
+                handoff=(
+                    "torch's own accuracy minifier can take this down to the FX graph level. "
+                    "Run the target again with TORCHDYNAMO_REPRO_AFTER=aot "
+                    "TORCHDYNAMO_REPRO_LEVEL=4 set in the environment."
+                ),
+            ),
+        ),
+        "minimized",
+    )
+    lines = report.splitlines()
+    assert max(len(line) for line in lines) <= 98
+    # The two variables must survive the wrap unbroken: a reader pastes them.
+    assert "TORCHDYNAMO_REPRO_AFTER=aot" in " ".join(report.split())
+    assert "TORCHDYNAMO_REPRO_LEVEL=4" in " ".join(report.split())
