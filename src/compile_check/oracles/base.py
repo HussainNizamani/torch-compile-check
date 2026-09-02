@@ -18,6 +18,7 @@ M3 without either having to re-derive it.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, runtime_checkable
 
@@ -26,6 +27,8 @@ from compile_check.results import BackendResult
 __all__ = [
     "DEFAULT_GRAD_TOL_FACTOR",
     "SEVERITIES",
+    "Baseline",
+    "BaselineEntry",
     "Finding",
     "Oracle",
     "OracleConfig",
@@ -121,6 +124,36 @@ class Finding:
 
 
 @dataclass(frozen=True)
+class BaselineEntry:
+    """One backend's accepted graph health, as ``--baseline`` records it."""
+
+    graph_break_count: int
+    """How many breaks the baseline run had."""
+
+    break_reasons: tuple[str, ...]
+    """The one-line identity of each of them, in the order they were written.
+
+    Summaries rather than Dynamo's full explanations: a baseline is a file
+    humans read in a diff, and the identity is what the comparison is made on.
+    :func:`compile_check.oracles.graph.summarise_reason` is the one place a
+    reason becomes one of these, so the writer and the comparison cannot drift.
+    """
+
+
+@dataclass(frozen=True)
+class Baseline:
+    """A parsed ``--baseline`` file: which run it came from, and what it holds.
+
+    The path travels with the entries because every finding the comparison
+    produces names it. A report that said "1 new graph break" without saying
+    what it is new *against* would not be evidence.
+    """
+
+    path: str
+    entries: Mapping[str, BaselineEntry]
+
+
+@dataclass(frozen=True)
 class OracleConfig:
     """Everything the oracles need from the command line, in one object.
 
@@ -168,6 +201,25 @@ class OracleConfig:
     Carried on the config rather than on the RunSet lane list because it is not
     a backend under test: it is a reference the numerics oracle reads, and the
     stage localizer of M1-3 must never treat it as a lane that diverged.
+    """
+
+    fullgraph: bool = False
+    """``--fullgraph``: whether the run demanded a single graph.
+
+    Duplicated from the run rather than read off it, for the same reason
+    :attr:`grad` is: an oracle is handed two lane records and this config, never
+    the :class:`~compile_check.results.RunSet`. The graph oracle needs it
+    because a graph break is informational when nobody asked for one graph and a
+    broken promise when somebody did.
+    """
+
+    baseline: Baseline | None = None
+    """``--baseline FILE``, parsed. ``None`` when no baseline was given.
+
+    PLAN.md "GitHub Action": with a baseline the graph oracle reports new breaks
+    only, which is the mode that makes the Action usable on a real model. The
+    correctness oracles never consult it -- there is no such thing as an
+    acceptable baseline of wrong answers.
     """
 
 
