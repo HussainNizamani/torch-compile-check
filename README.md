@@ -39,10 +39,13 @@ A composite GitHub Action lives in [`action/`](action/action.yml):
 ```
 
 It installs `compile-check`, runs it against the entrypoints you declare, and
-fails the job on the configured `--fail-on` categories. See
-[docs/action.md](docs/action.md) for the full inputs/outputs reference,
-baseline semantics, and the note on how it degrades honestly before M1-3
-lands the CLI's main run path.
+fails the job on the configured `--fail-on` categories. The `source` input
+(default `auto`) installs from the checked-out source when the action runs
+inside this repo, and from `git+https://...@ref` otherwise — the git path is
+what external consumers use once the repo is public or the package is on
+PyPI. See [docs/action.md](docs/action.md) for the full inputs/outputs
+reference, baseline semantics, and the note on how it degrades honestly
+before M1-3 lands the CLI's main run path.
 
 ## Blind spot, stated up front
 
