@@ -115,7 +115,11 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--backend", default=None, help="extra backend to also check, e.g. aot_eager")
+    parser.add_argument(
+        "--backend",
+        default=None,
+        help="extra backend to also check, e.g. aot_eager",
+    )
     args = parser.parse_args()
 
     case = "alias_noop_view_identity"
@@ -124,12 +128,18 @@ def main():
     try:
         eager_out = fn(*example_inputs)
         compiled_out = torch.compile(fn, backend="inductor")(*example_inputs)
-    except Exception as exc:  # noqa: BLE001 - a crash in the case itself, not a RED finding
+    except Exception as exc:
         print(f"CRASH {case} :: {type(exc).__name__}: {exc}")
         sys.exit(2)
 
     identity_collapsed = _identity_probe()
-    is_red = _report(case, "inductor", eager_out, compiled_out, extra=f" (base_is_alias={identity_collapsed})")
+    is_red = _report(
+        case,
+        "inductor",
+        eager_out,
+        compiled_out,
+        extra=f" (base_is_alias={identity_collapsed})",
+    )
     exit_code = 1 if is_red else 0
 
     if args.backend:

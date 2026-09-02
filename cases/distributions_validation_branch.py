@@ -83,15 +83,22 @@ def check(eager_out, compiled_out, inputs):
             f"{type(payload).__name__}: {str(payload)[:160]}"
         )
     if not torch.equal(payload, eager_out):
-        return True, f"fullgraph=True returned a value but it diverges from eager: eager={eager_out.tolist()} compiled={payload.tolist()}"
-    return False, f"fullgraph=True captured the graph and matched eager: {payload.tolist()}"
+        return (
+            True,
+            f"fullgraph=True returned a value but it diverges from eager: "
+            f"eager={eager_out.tolist()} compiled={payload.tolist()}",
+        )
+    return (
+        False,
+        f"fullgraph=True captured the graph and matched eager: {payload.tolist()}",
+    )
 
 
 def _try_fullgraph(fn, example_inputs, backend_name):
     try:
         value = torch.compile(fn, backend=backend_name, fullgraph=True)(*example_inputs)
         return (False, value)
-    except Exception as exc:  # noqa: BLE001 - intentionally broad, this is the thing under test
+    except Exception as exc:
         return (True, exc)
 
 
@@ -109,7 +116,11 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--backend", default=None, help="extra backend to also check, e.g. aot_eager")
+    parser.add_argument(
+        "--backend",
+        default=None,
+        help="extra backend to also check, e.g. aot_eager",
+    )
     args = parser.parse_args()
 
     case = "distributions_validation_branch"
@@ -123,11 +134,14 @@ def main():
     try:
         no_fullgraph_out = torch.compile(fn, backend="inductor")(*example_inputs)
         no_fullgraph_matches = torch.equal(no_fullgraph_out, eager_out)
-    except Exception:  # noqa: BLE001
+    except Exception:
         no_fullgraph_matches = False
 
     is_red = _report(
-        case, "inductor", eager_out, compiled_result,
+        case,
+        "inductor",
+        eager_out,
+        compiled_result,
         extra=f" (fullgraph=False matches eager: {no_fullgraph_matches})",
     )
     exit_code = 1 if is_red else 0
