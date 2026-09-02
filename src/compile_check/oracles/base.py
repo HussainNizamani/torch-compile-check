@@ -50,14 +50,31 @@ log = logging.getLogger("compile_check")
 # Ten is not enough for every model, and this is the honest record of that, per
 # PLAN.md "Tolerance policy" ("start with the assert_close defaults, measure the
 # false-positive rate on the validation set, and only move to per-op tolerances
-# if the defaults prove too tight"). Measured on this repo's own validation
-# target, torchvision resnet18 at 2x3x64x64 on torch 2.14.0+cpu, aarch64, CPU:
-# aot_eager reproduces eager's gradients bit for bit, and inductor needs a
-# factor of about 161 to pass -- 61 of 63 gradients are past 1x and 21 are past
-# 10x. It is not a miscompile. Against a float64 eager reference the two lanes
-# sit at the same order of error (worst relative distance 3.4e-5 for eager
-# against 3.9e-5 for inductor), which is PLAN.md "The oracle blind spot"'s "both
-# imprecise" rather than "compiled is wrong": the assert_close float32 defaults
+# if the defaults prove too tight"). Measured on torchvision resnet18 at
+# 2x3x64x64 on torch 2.14.0+cpu, aarch64, CPU, seed 0, and the training mode is
+# half the measurement rather than an incidental detail:
+#
+#   model.eval()   inductor needs a factor of 1.0 to pass (worst gradient
+#                  1.34e-5 against an atol of 1e-5), which is the borderline
+#                  above, sitting on the wrong side of it by a last bit.
+#   model.train()  inductor needs a factor of about 161 -- 61 of 63 gradients
+#                  are past 1x and 21 are past 10x.
+#
+# Batch norm is the difference. In eval mode it is an affine map over frozen
+# running statistics; in train mode the normalisation is over the batch, so
+# every gradient reaching conv1 travels back through a mean and a variance
+# computed from the activations, and the reassociation compilation is free to do
+# has that much further to accumulate over. `validation/targets/tv_resnet18.py`
+# is the eval-mode row, deliberately (its docstring says why); the train-mode
+# row is the same architecture with `model.train()`, which is how anyone
+# actually differentiating a resnet runs it.
+#
+# aot_eager reproduces eager's gradients bit for bit in both modes, so the
+# spread is inductor's codegen and not the harness. It is not a miscompile
+# either: against a float64 eager reference the two lanes sit at the same order
+# of error in the train-mode row (worst per-tensor max|diff|/max|ref|: 3.4e-5
+# for eager, 3.9e-5 for inductor), which is PLAN.md "The oracle blind spot"'s
+# "both imprecise" rather than "compiled is wrong": the assert_close float32 defaults
 # are simply below the noise floor of a deep backward, and no single constant
 # is right for both a two-layer MLP (which needs 1x, bit-identical) and a
 # resnet. So the default clears the measured borderline case, the flag is how a
