@@ -50,7 +50,7 @@ log = logging.getLogger("compile_check")
 # Ten is not enough for every model, and this is the honest record of that, per
 # PLAN.md "Tolerance policy" ("start with the assert_close defaults, measure the
 # false-positive rate on the validation set, and only move to per-op tolerances
-# if the defaults prove too tight"). Measured on torchvision resnet18 at
+# if the defaults prove too tight"). Measured on torchvision 0.29.0+cpu resnet18 at
 # 2x3x64x64 on torch 2.14.0+cpu, aarch64, CPU, seed 0, and the training mode is
 # half the measurement rather than an incidental detail:
 #

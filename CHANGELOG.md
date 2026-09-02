@@ -87,8 +87,8 @@ All notable changes to this project are documented here. The format follows
   against a float32 atol of 1e-5 and the same run flip between clean and
   failing. The tolerances for outputs are unchanged, and the report's
   environment block records the factor the gradients were compared under. Ten
-  clears the measured borderline case and not every model: a resnet18 backward
-  at 2x3x64x64 on torch 2.14.0+cpu/aarch64 needs 1x in eval mode and about 161x
+  clears the measured borderline case and not every model: a torchvision 0.29.0 resnet18
+  backward at 2x3x64x64 on torch 2.14.0+cpu/aarch64 needs 1x in eval mode and about 161x
   in train mode, where batch norm sends every gradient back through statistics
   computed from the batch. A float64 reference puts eager and inductor at the
   same order of error there (3.4e-5 against 3.9e-5), so that is the float32
