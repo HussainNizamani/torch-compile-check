@@ -1409,6 +1409,62 @@ def test_md_says_the_eager_reference_raised_not_a_compiled_lane(capsys, tmp_path
     assert "## Regression test" not in draft
 
 
+def test_emit_test_writes_nothing_when_no_eager_lane_ran_at_all(capsys, tmp_path):
+    # Residual-defect regression, the NO_REFERENCE sibling of the MODEL-stage
+    # test above: no --backends eager at all, so a compiled lane that raised
+    # (raises.py raises under every backend) still did not diverge from
+    # anything -- there is no reference run to have diverged from.
+    path = tmp_path / "test_raises.py"
+    code = main(
+        [
+            str(FIXTURES / "raises.py"),
+            "--backends",
+            "aot_eager,inductor",
+            "--emit-test",
+            str(path),
+            "--color",
+            "never",
+        ]
+    )
+    err = capsys.readouterr().err
+
+    assert code == EXIT_ERROR
+    assert not path.exists()
+    assert (
+        "--emit-test wrote no file: no eager reference lane ran, "
+        "so there is no eager behaviour to assert" in err
+    )
+
+
+def test_md_says_no_eager_lane_when_none_ran(capsys, tmp_path):
+    # Residual-defect regression, the Markdown half: before the fix the title
+    # still read "[aot_eager] torch.compile raises RuntimeError ..." and
+    # carried a "## Regression test" section, although there was no eager run
+    # for aot_eager to have diverged from in the first place.
+    path = tmp_path / "draft.md"
+    code = main(
+        [
+            str(FIXTURES / "raises.py"),
+            "--backends",
+            "aot_eager,inductor",
+            "--md",
+            str(path),
+            "--color",
+            "never",
+        ]
+    )
+    capsys.readouterr()
+
+    assert code == EXIT_ERROR
+    draft = path.read_text()
+
+    assert draft.startswith("# compile-check could not compare")
+    assert "the run had no eager lane to compare against" in draft
+    assert "raised where eager did not" not in draft
+    assert "torch.compile raises" not in draft
+    assert "## Regression test" not in draft
+
+
 def test_emit_test_writes_nothing_on_a_clean_run_and_says_so(capsys, tmp_path):
     path = tmp_path / "test_case.py"
     code = main(

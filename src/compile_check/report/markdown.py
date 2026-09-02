@@ -114,14 +114,21 @@ def title(runset: RunSet, findings: Sequence[Finding], verdict: StageVerdict) ->
     if top is not None:
         return f"[{top.backend}] torch.compile changes {_subject(top)} of {target}"
 
-    if verdict.eager_exception is not None:
-        # The reference itself raised (PLAN.md's MODEL stage): a compiled lane
-        # that also raised did not diverge from anything, so the title names
-        # what actually happened -- eager raising -- rather than naming a
+    if not verdict.compared:
+        # No working eager run to have diverged from -- MODEL (eager itself
+        # raised) or NO_REFERENCE (no eager lane ran at all) alike. A compiled
+        # lane that also raised in either case did not diverge from anything,
+        # so the title names what actually happened rather than naming a
         # compiled lane as though torch.compile were the one that broke it.
+        # NO_REFERENCE reuses _preamble's own phrase for the same fact.
+        if verdict.eager_exception is not None:
+            return (
+                f"compile-check could not compare {target}: "
+                f"the eager reference raised {verdict.eager_exception.type}"
+            )
         return (
             f"compile-check could not compare {target}: "
-            f"the eager reference raised {verdict.eager_exception.type}"
+            "the run had no eager lane to compare against"
         )
 
     raised = next(
@@ -134,8 +141,6 @@ def title(runset: RunSet, findings: Sequence[Finding], verdict: StageVerdict) ->
     )
     if raised is not None and raised.raised is not None:
         return f"[{raised.backend}] torch.compile raises {raised.raised.type} on {target}"
-    if not verdict.compared:
-        return f"compile-check could not compare {target}: {verdict.stage}"
     return f"compile-check found no divergence on {target}"
 
 

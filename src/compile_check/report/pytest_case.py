@@ -569,14 +569,15 @@ def _tolerances(finding: Finding) -> str:
 def _raised_lane(verdict: StageVerdict) -> tuple[str, str] | None:
     """The first compiled lane that raised, and the first line of why.
 
-    ``None`` when the eager reference itself raised (``verdict.eager_exception``
-    is set, PLAN.md's :data:`~compile_check.localize.MODEL` stage): a compiled
-    lane that also raised there is not a lane that diverged from a working
-    eager run, and "raised where eager did not" would be false. That case is a
-    tool error, not a finding -- there is no eager behaviour left to write a
-    test against.
+    ``None`` when there is no working eager run to have diverged from --
+    ``not verdict.compared``, PLAN.md's :data:`~compile_check.localize.MODEL`
+    (eager itself raised) and :data:`~compile_check.localize.NO_REFERENCE`
+    (no eager lane ran at all) alike. A compiled lane that raised in either
+    case did not diverge from anything, so "raised where eager did not" would
+    be false; both are a tool error, not a finding, and there is no eager
+    behaviour left to write a test against.
     """
-    if verdict.eager_exception is not None:
+    if not verdict.compared:
         return None
     for entry in verdict.backends:
         if entry.backend != "eager" and entry.raised is not None:

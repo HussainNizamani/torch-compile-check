@@ -361,6 +361,20 @@ def test_nothing_is_emitted_when_the_eager_reference_itself_raised():
     assert emit(runset, [], localize(runset, [])) is None
 
 
+def test_nothing_is_emitted_when_no_eager_lane_ran_at_all():
+    # The NO_REFERENCE sibling of the MODEL-stage case above: no eager result
+    # at all, so a compiled lane that raised still did not diverge from
+    # anything -- there is no reference run to compare it against, let alone
+    # one it disagreed with.
+    runset = make_runset()
+    del runset.results["eager"]
+    runset.results["inductor"].exception = CapturedException(
+        type="RuntimeError", message="backend compiler failed", traceback=()
+    )
+
+    assert emit(runset, [], localize(runset, [])) is None
+
+
 def test_a_clean_run_emits_nothing():
     runset = make_runset()
 

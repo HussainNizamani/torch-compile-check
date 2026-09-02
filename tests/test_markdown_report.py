@@ -275,6 +275,35 @@ def test_a_model_that_raised_in_eager_carries_no_regression_test_section(runset)
     assert "raised where eager did not" not in text
 
 
+def test_no_eager_lane_at_all_names_no_reference_in_the_title_not_the_lane(runset):
+    # The NO_REFERENCE sibling of test_a_model_that_raised_in_eager_names_it_
+    # in_the_title_not_the_lane above: no eager result at all rather than a
+    # raised one, and a compiled lane that raised still must not be named as
+    # though torch.compile broke it.
+    del runset.results["eager"]
+    runset.results["inductor"].exception = CapturedException(
+        type="RuntimeError", message="backend compiler failed", traceback=()
+    )
+    verdict = localize(runset, [])
+
+    assert title(runset, [], verdict) == (
+        "compile-check could not compare cases/dtype_promotion.py: "
+        "the run had no eager lane to compare against"
+    )
+    assert "torch.compile raises" not in title(runset, [], verdict)
+
+
+def test_no_eager_lane_at_all_carries_no_regression_test_section(runset):
+    del runset.results["eager"]
+    runset.results["inductor"].exception = CapturedException(
+        type="RuntimeError", message="backend compiler failed", traceback=()
+    )
+    text = draft(runset, findings=())
+
+    assert "## Regression test" not in text
+    assert "raised where eager did not" not in text
+
+
 def test_the_findings_are_capped_and_the_rest_counted(runset):
     findings = [FINDING] * 4
     text = draft(runset, findings=findings, max_findings=2)
