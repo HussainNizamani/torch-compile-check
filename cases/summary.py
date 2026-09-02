@@ -4,7 +4,9 @@
 RED/GREEN script in ``cases/`` and prints one table of observed against expected
 verdicts. CI appends it to ``$GITHUB_STEP_SUMMARY`` on every matrix cell, so the
 question "which of the five bugs does *this* torch still have" is answered on
-the job page rather than by reading a log.
+the job page rather than by reading a log. ``python cases/summary.py`` works
+too, because every other file in this directory does and a module that broke the
+habit would be a papercut; see the bootstrap below the imports.
 
 Output goes to stdout and the workflow redirects it. That is deliberate: a
 module that wrote to ``$GITHUB_STEP_SUMMARY`` itself would be untestable
@@ -32,11 +34,18 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from cases.markers import CASES, MARKERS, Verdict, expected_verdict
+CASES_DIR = Path(__file__).resolve().parent
+
+# Run as a script, Python puts `cases/` on the path and not the repository root,
+# so `cases.markers` does not resolve; run with `-m` from the root, it already
+# does and this is a no-op. The alternative was a module that is the one file in
+# this directory you cannot just run, which is worse than four lines and a noqa.
+if __package__ in {None, ""}:  # pragma: no cover - only true under `python cases/summary.py`
+    sys.path.insert(0, str(CASES_DIR.parent))
+
+from cases.markers import CASES, MARKERS, Verdict, expected_verdict  # noqa: E402
 
 __all__ = ["Observation", "main", "observe", "render_table"]
-
-CASES_DIR = Path(__file__).resolve().parent
 
 # The exit codes the standalone scripts agree on (cases/README.md "Adding a
 # case"): 1 is RED, 0 is GREEN, and 2 is a crash, which establishes neither.
