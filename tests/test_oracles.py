@@ -687,6 +687,9 @@ def test_an_output_that_overlaps_itself_is_recorded_as_context():
     assert [finding.severity for finding in findings] == ["info"]
     assert findings[0].details == {
         "field": "internal_overlap",
+        # The entity the finding is about, as a label rather than only inside
+        # the message: M3-2's JSON artifact and test emitter read it from here.
+        "left": "output[0]",
         "expected": 0,
         "got": 1,
         "eager_relation": ["no aliases, no mutations"],
