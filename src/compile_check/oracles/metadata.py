@@ -8,27 +8,193 @@ PLAN.md "metadata": stride is compared but reported at a lower severity than
 dtype and shape, because a layout change alone is usually a performance decision
 rather than a correctness defect. It still appears in the report, since a stride
 change combined with an alias change is how a reinplacing bug presents.
+
+The stride rule, stated once so it is not re-derived from the code: a stride
+difference where **both** tensors report ``is_contiguous()`` is a ``warn``, and
+any other stride difference is a ``fail``. Two contiguous tensors of the same
+shape are indistinguishable through indexing, and their strides can still differ
+legitimately -- a size-1 or size-0 dimension has no meaningful stride, and a
+compiled kernel is free to pick another one. Once either side is not contiguous
+the stride is observable: it decides what a view sees and what a mutation
+through that view writes.
+
+Torch is imported inside the functions, never at module scope.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import importlib
+import logging
+from collections.abc import Callable
 from typing import Any
 
-__all__ = ["check"]
+from compile_check.oracles.base import Finding, OracleConfig, Severity, align_outputs
+from compile_check.results import BackendResult
+
+__all__ = ["FIELDS", "MetadataOracle"]
+
+log = logging.getLogger("compile_check")
+
+_UNAVAILABLE = object()
+
+# Compared in this order, which is the order the report lists them in: the two
+# fields that are almost always the defect first, then layout facts.
+FIELDS: tuple[str, ...] = (
+    "dtype",
+    "shape",
+    "stride",
+    "requires_grad",
+    "device",
+    "is_contiguous",
+    "layout",
+)
 
 
-def check(
-    eager: Mapping[str, Any],
-    compiled: Mapping[str, Any],
-) -> list[dict[str, Any]]:
-    """Compare the two runs' per-output metadata.
+class MetadataOracle:
+    """Do the two worlds return tensors of the same shape, dtype, and layout?"""
 
-    Args:
-        eager: the reference run record.
-        compiled: the run record under test.
+    name: str = "metadata"
 
-    Returns:
-        One record per field that differs; empty when every field matches.
+    def compare(
+        self,
+        eager: BackendResult,
+        other: BackendResult,
+        cfg: OracleConfig,
+    ) -> list[Finding]:
+        """Compare every output leaf field by field.
+
+        ``cfg`` is unused: metadata equality is exact, so there is no tolerance
+        to apply. The parameter stays because it is the
+        :class:`~compile_check.oracles.base.Oracle` protocol.
+        """
+        del cfg
+        torch = importlib.import_module("torch")
+        pairs, findings = align_outputs(eager, other, self.name)
+        for index, expected, got in pairs:
+            findings.extend(self._compare_leaf(torch, index, expected, got, other.backend))
+        return findings
+
+    def _compare_leaf(
+        self,
+        torch: Any,
+        index: int,
+        expected: Any,
+        got: Any,
+        backend: str,
+    ) -> list[Finding]:
+        """One output leaf."""
+        expected_is_tensor = isinstance(expected, torch.Tensor)
+        got_is_tensor = isinstance(got, torch.Tensor)
+        if not expected_is_tensor or not got_is_tensor:
+            return self._compare_types(index, expected, got, backend)
+
+        expected_fields = _describe(torch, expected)
+        got_fields = _describe(torch, got)
+        findings = []
+        for name in FIELDS:
+            expected_value = expected_fields[name]
+            got_value = got_fields[name]
+            if expected_value is _UNAVAILABLE or got_value is _UNAVAILABLE:
+                # A layout that does not answer for this field on one side or
+                # the other; the layout difference itself is reported below.
+                log.debug("output %d: %s is unavailable on one side", index, name)
+                continue
+            if expected_value == got_value:
+                continue
+            severity: Severity = "fail"
+            note = ""
+            if (
+                name == "stride"
+                and expected_fields["is_contiguous"] is True
+                and got_fields["is_contiguous"] is True
+            ):
+                severity = "warn"
+                note = (
+                    ", but both tensors are contiguous, so this is a layout choice "
+                    "rather than an observable difference"
+                )
+            findings.append(
+                Finding(
+                    oracle=self.name,
+                    backend=backend,
+                    output_index=index,
+                    severity=severity,
+                    message=(
+                        f"{name} differs: eager {_show(expected_value)}, "
+                        f"{backend} {_show(got_value)}{note}"
+                    ),
+                    details={"field": name, "expected": expected_value, "got": got_value},
+                )
+            )
+        return findings
+
+    def _compare_types(
+        self,
+        index: int,
+        expected: Any,
+        got: Any,
+        backend: str,
+    ) -> list[Finding]:
+        """At least one side is not a tensor: compare what the leaf even is.
+
+        A model that returns a tensor under eager and an int under inductor has
+        broken the contract before any field can be compared. Two non-tensor
+        leaves of the same type are the numerics oracle's business, since ``==``
+        is the whole comparison there.
+        """
+        if type(expected) is type(got):
+            return []
+        return [
+            Finding(
+                oracle=self.name,
+                backend=backend,
+                output_index=index,
+                severity="fail",
+                message=(
+                    f"output type differs: eager returned a {type(expected).__name__}, "
+                    f"{backend} returned a {type(got).__name__}"
+                ),
+                details={
+                    "field": "type",
+                    "expected": type(expected).__name__,
+                    "got": type(got).__name__,
+                },
+            )
+        ]
+
+
+def _describe(torch: Any, tensor: Any) -> dict[str, Any]:
+    """Every compared field of one tensor, as report-ready values.
+
+    Values are strings, ints, bools, and lists rather than torch objects, so a
+    finding's ``details`` survives the JSON report of M3 unchanged. A field a
+    layout refuses to answer (a sparse or nested tensor and ``stride()``) is
+    recorded as unavailable rather than as an error: the layout difference is
+    the finding, and a traceback out of an oracle is not.
     """
-    raise NotImplementedError("the metadata oracle lands in M1")
+    fields: dict[str, Any] = {}
+    readers: dict[str, Callable[[], Any]] = {
+        "dtype": lambda: str(tensor.dtype),
+        "shape": lambda: list(tensor.shape),
+        "stride": lambda: list(tensor.stride()),
+        "requires_grad": lambda: bool(tensor.requires_grad),
+        # PLAN.md "metadata" compares the device; the type is what is compared,
+        # not the index, so cuda:0 and cuda:1 are not a divergence of this run.
+        "device": lambda: tensor.device.type,
+        "is_contiguous": lambda: bool(tensor.is_contiguous()),
+        "layout": lambda: str(tensor.layout),
+    }
+    for name, read in readers.items():
+        try:
+            fields[name] = read()
+        except Exception as exc:
+            log.debug("%s is unavailable on this tensor: %s", name, exc)
+            fields[name] = _UNAVAILABLE
+    return fields
+
+
+def _show(value: Any) -> str:
+    """Render a field value the way a terminal report wants to read it."""
+    if isinstance(value, list):
+        return f"({', '.join(str(item) for item in value)})"
+    return str(value)
