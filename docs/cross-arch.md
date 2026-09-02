@@ -42,8 +42,17 @@ are **not** `pyproject.toml` dependencies — see
 [validation.md "Extras"](validation.md#extras) for why:
 
 ```console
-$ python -m pip install torchvision transformers
+$ python -m pip install torchvision --index-url https://download.pytorch.org/whl/cpu
+$ python -m pip install "transformers<5"
 ```
+
+Two things about that line are load-bearing. `torchvision` must come from the
+**same index as `torch`** (the CPU index here; on a CUDA box the matching
+`whl/cuXXX` index for both packages): the PyPI wheel is built against a
+different torch ABI and fails at import with `operator torchvision::nms does
+not exist`, which turns every `tv_*` target into an exit-2 tool error. And
+`transformers` 5.x moved `BertModel` behind a lazy import that fails on this
+target, so pin it below 5 until the target catches up (M4-3).
 
 (`pyproject.toml` does not have a `validation` extra yet — see M4-3 in
 [PLAN.md "Milestones"](../PLAN.md); once it lands, `pip install -e ".[dev,validation]"`
@@ -102,8 +111,11 @@ questions.
 **The validation summary** (`python validation/run.py`, [validation.md](validation.md))
 runs the six public-model targets under `validation/targets/` and writes
 *one* combined file, `validation/results/<date>-<arch>-<torch version>.json` —
-architecture-named by construction, so a run on a second machine lands next
-to the committed aarch64 one without colliding:
+architecture-named by construction, so a run on a second machine with a
+different architecture, torch version or date lands next to the committed
+aarch64 one. A run that matches all three (this box on the same day)
+overwrites the committed file instead: commit or `git checkout --` it
+deliberately.
 
 ```console
 $ python validation/run.py --targets train_step_mlp
