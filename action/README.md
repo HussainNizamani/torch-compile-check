@@ -84,7 +84,8 @@ a green checkmark.
 A `torch.compile` graph break is not, by itself, a wrong answer — failing the
 build on every break would make the action unusable on day one for any real
 model with existing breaks. Pass `baseline` (a path to a stored graph-health
-JSON, lands with M3-1) and the graph oracle fails on **new** breaks only. The
+JSON, written by `--write-baseline` since M3-1) and the graph oracle fails on
+**new** breaks only. The
 correctness categories — numerics, alias, metadata, grad — always fail
 regardless of any baseline; there is no such thing as an acceptable baseline
 of wrong answers. Full detail in

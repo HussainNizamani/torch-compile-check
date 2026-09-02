@@ -202,6 +202,38 @@ merge order.
   to have been copied either. `tests/fixtures/graph_break.py`: a target with a
   deliberate `print` break and a deliberate data-dependent branch. All five
   oracles now run.
+- **M3-2**: the three report artifacts of PLAN.md "Reports", off one run.
+  `report/json.py`: the CI-consumable artifact, `schema_version` 1, carrying
+  the environment block (architecture always, per PLAN.md "Cross-architecture
+  parity is a feature"), the run configuration including the module handling
+  that actually happened, one record per lane with its timings, its exception,
+  its repeat-call exception and its graph health, every finding with its
+  details, the verdict with per-lane counts, and the exit code. Validation is
+  hand-rolled in `validate()` -- torch stays the only dependency -- and `dump`
+  refuses to write a document that does not match the schema. There is no
+  timestamp in it, deliberately: parity in v1 is two machines and a diff, and a
+  `compile-check compare a.json b.json` subcommand is v0.2. `report/markdown.py`:
+  an issue draft in the shape the PyTorch tracker expects -- a title naming the
+  lane and what changed, the repro inline, expected versus got per finding, the
+  stage line with PLAN.md's observability caveat, the emitted regression test,
+  the environment block, and the command that produced it. It writes no
+  disclosure line: whether a person discloses tooling on an issue they file
+  under their own name is theirs to decide. `report/pytest_case.py`: the top
+  fail-severity finding as a regression test in the inductor suite's
+  eager-versus-compiled idiom, asserting what the oracle failed on --
+  `assertEqual` on `dtype`/`shape`/`stride` for metadata, `assertIsNot` plus a
+  `data_ptr` comparison for alias, a backward per lane for grad (and, for a
+  parameter gradient, the two lanes run one after the other, since
+  `torch.compile(model)` shares the module's parameters), `explain` for graph,
+  and `torch.testing.assert_close` as the general form. A clean run writes no
+  file and says which of the two reasons it was. `report/repro.py`: the target's
+  own source reduced to the statements the entry point and the inputs need,
+  shared by the draft and the emitter so the two cannot disagree about what ran;
+  a file whose entry point is bound inside a block falls back to the whole file
+  and says so. `--json FILE`, `--md FILE` and `--emit-test FILE` write them, each
+  saying so on stderr as `--write-baseline` does, and a write that fails is exit
+  2 after the report rather than instead of it. `discover.load_target` records
+  where the target came from (`results.TargetSource`) so a report can quote it.
 
 ### Fixed
 

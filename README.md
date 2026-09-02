@@ -7,9 +7,10 @@
 > Point it at a model and it runs eager, `aot_eager`, and `inductor`, compares
 > the numerics, the aliasing and mutation behaviour, the output metadata, the
 > gradients, and the graph health, names the compilation stage a divergence
-> first appears in, and prints a report. The minimizer and the JSON, Markdown,
-> and pytest-case reports (M3-2, M3-3) are still stubs; the report says which
-> checks did not run, so a missing feature never reads as a passing one.
+> first appears in, prints a report, and writes the JSON, Markdown, and
+> regression-test artifacts. The minimizer (M3-3) is still a stub, so a repro is
+> the target's own source rather than a shrunk one; the report says which checks
+> did not run, so a missing feature never reads as a passing one.
 
 Bring your own model; compile-check tells you whether `torch.compile` changed its
 answers, and if so hands you a minimal repro and a ready-to-file report. The tool is a
@@ -54,6 +55,23 @@ The stage verdict names the first backend that diverges, which is where the
 divergence becomes observable and not necessarily where the fix belongs; the report
 says so every time, because the two are not the same question.
 
+Three artifacts come off the same run:
+
+```console
+$ compile-check cases/dtype_promotion.py --json out.json --md draft.md --emit-test test_case.py
+```
+
+`--json` writes the versioned, CI-consumable result — schema version 1, with the
+environment block, the run configuration, one record per lane and per finding, and
+the verdict. It is the unit of cross-architecture comparison: run the tool on ARM
+and on x86 and diff the two files (a first-class `compile-check compare` is v0.2).
+`--md` writes an issue draft in the shape PyTorch issues expect, with the repro
+inline, expected versus got per finding, the stage line, and the environment block;
+the tool drafts, and a person reads it, edits it, and files it. `--emit-test` writes
+the top finding as a regression test in the inductor suite's eager-versus-compiled
+idiom, asserting the property the oracle failed on. A clean run writes no test and
+says so, because a regression test that asserts nothing is worse than no file.
+
 The plan, including the full oracle design and the milestone schedule, is in
 [PLAN.md](PLAN.md).
 
@@ -89,8 +107,10 @@ fails the job on the configured `--fail-on` categories. The `source` input
 inside this repo, and from `git+https://...@ref` otherwise — the git path is
 what external consumers use once the repo is public or the package is on
 PyPI. See [docs/action.md](docs/action.md) for the full inputs/outputs
-reference, baseline semantics, and the note on how it degrades honestly
-before M1-3 lands the CLI's main run path.
+reference, baseline semantics, and the note on how it degrades honestly on an
+old ref: the CLI's main run path landed in M1-3, so `compile-check <target>`
+runs for real on any current ref and exits 0, 1, or 2, and only a ref pinned
+before M1-3 exits 2 with "not implemented".
 
 ## Validation against real models
 
