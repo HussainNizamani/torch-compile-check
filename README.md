@@ -3,12 +3,13 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 <!-- badge placeholders: CI, PyPI, and the torch matrix land with M4 -->
 
-> **Status: M1, the tool runs end to end with two of the five oracles.** Point it
-> at a model and it runs eager, `aot_eager`, and `inductor`, compares the numerics
-> and the output metadata, names the compilation stage a divergence first appears
-> in, and prints a report. The alias, grad, and graph oracles (M2) and the JSON,
-> Markdown, and pytest-case reports (M3) are still stubs; the report says which
-> checks did not run, so a missing oracle never reads as a passing one.
+> **Status: M2 in progress, the tool runs end to end with three of the five
+> oracles.** Point it at a model and it runs eager, `aot_eager`, and `inductor`,
+> compares the numerics, the aliasing and mutation behaviour, and the output
+> metadata, names the compilation stage a divergence first appears in, and prints
+> a report. The grad oracle (M2-2), the graph oracle and the JSON, Markdown, and
+> pytest-case reports (M3) are still stubs; the report says which checks did not
+> run, so a missing oracle never reads as a passing one.
 
 Bring your own model; compile-check tells you whether `torch.compile` changed its
 answers, and if so hands you a minimal repro and a ready-to-file report. The tool is a
@@ -37,7 +38,7 @@ $ compile-check tests/fixtures/mlp.py
 checks
   oracle    fail-on  aot_eager         inductor
   numerics  yes      pass              pass
-  alias     yes      not yet           not yet
+  alias     yes      pass              pass
   metadata  yes      pass              pass
   grad      yes      not yet           not yet
   graph     no       not yet           not yet
