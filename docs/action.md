@@ -74,6 +74,7 @@ fixed version:
 | `json-out` | `compile-check-results.json` | Base path for the JSON results. With more than one target, each run writes its own file suffixed `.<n>.json` next to this base (`compile-check-results.1.json`, `.2.json`, ...), since one CLI invocation produces one JSON document per PLAN.md "Reports". |
 | `extra-args` | *(unset)* | Extra arguments appended verbatim to every invocation, for flags this action does not wrap directly (`--rtol`, `--seed`, `--fullgraph`, ...). |
 | `ref` | `main` | Git ref of `HussainNizamani/compile-check` to install from, until the package ships on PyPI. |
+| `source` | `auto` | Where to install compile-check from. `auto` installs from the checked-out source when the action runs inside this repo (its parent directory declares `compile-check` in `pyproject.toml`), else falls back to `git`. `local` forces the checked-out-source install. `git` forces `pip install git+https://.../compile-check@ref` — the only option that works for external consumers, since pip cannot clone a private repo without credentials. |
 | `allow-unimplemented` | `false` | See "Degrading honestly" below. |
 
 ## Outputs

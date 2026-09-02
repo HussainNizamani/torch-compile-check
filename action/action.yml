@@ -64,6 +64,19 @@ inputs:
       package is on PyPI.
     required: false
     default: "main"
+  source:
+    description: >-
+      Where to install compile-check from: "auto" (default) installs from
+      the checked-out source when the action runs inside this repo (its
+      parent directory has a pyproject.toml declaring compile-check), else
+      falls back to "git"; "local" forces the checked-out-source install
+      (`pip install $GITHUB_ACTION_PATH/..`); "git" forces
+      `pip install git+https://github.com/HussainNizamani/compile-check@ref`
+      (needed by external consumers once the repo is public or the package
+      is on PyPI, since pip cannot clone a private repo without
+      credentials).
+    required: false
+    default: "auto"
   allow-unimplemented:
     description: >-
       Today the CLI's main run path is not implemented yet (it lands in
@@ -101,7 +114,8 @@ runs:
         case "${{ inputs.torch }}" in
           stable)
             python -m pip install --upgrade pip
-            python -m pip install "torch>=2.4"
+            python -m pip install "torch>=2.4" \
+              --index-url https://download.pytorch.org/whl/cpu
             ;;
           nightly)
             python -m pip install --upgrade pip
@@ -116,9 +130,35 @@ runs:
 
     - name: Install compile-check
       shell: bash
+      env:
+        SOURCE: ${{ inputs.source }}
+        REF: ${{ inputs.ref }}
       run: |
         set -euo pipefail
-        python -m pip install "git+https://github.com/HussainNizamani/compile-check@${{ inputs.ref }}"
+
+        repo_root="$GITHUB_ACTION_PATH/.."
+        mode="$SOURCE"
+        if [ "$mode" = "auto" ]; then
+          if [ -f "$repo_root/pyproject.toml" ] \
+            && grep -q 'name = "compile-check"' "$repo_root/pyproject.toml"; then
+            mode="local"
+          else
+            mode="git"
+          fi
+        fi
+
+        case "$mode" in
+          local)
+            python -m pip install "$repo_root"
+            ;;
+          git)
+            python -m pip install "git+https://github.com/HussainNizamani/compile-check@${REF}"
+            ;;
+          *)
+            echo "::error::Unknown source '$SOURCE' (expected auto, local, or git)" >&2
+            exit 1
+            ;;
+        esac
 
     - name: Run compile-check
       id: run
