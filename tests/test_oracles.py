@@ -18,7 +18,9 @@ was imported, which is the only moment at which it can be set.
 
 from __future__ import annotations
 
+import json
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +32,8 @@ from compile_check.oracles import (
     DEFAULT_GRAD_TOL_FACTOR,
     ORACLE_NAMES,
     ORACLES,
+    Baseline,
+    BaselineEntry,
     Finding,
     Oracle,
     OracleConfig,
@@ -37,9 +41,18 @@ from compile_check.oracles import (
 )
 from compile_check.oracles.alias import AliasOracle, relation
 from compile_check.oracles.grad import GradOracle
+from compile_check.oracles.graph import (
+    MAX_REASON_CHARS,
+    BaselineError,
+    GraphOracle,
+    baseline_entry,
+    read_baseline,
+    summarise_reason,
+    write_baseline,
+)
 from compile_check.oracles.metadata import MetadataOracle
 from compile_check.oracles.numerics import FALLBACK_TOLERANCES, NumericsOracle, resolve_tolerances
-from compile_check.results import BackendResult, CapturedException
+from compile_check.results import BackendResult, CapturedException, GraphBreak, GraphHealth, RunSet
 from compile_check.runner import FP64_BACKEND, run_all, run_backend
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -50,6 +63,7 @@ NUMERICS = NumericsOracle()
 ALIAS = AliasOracle()
 METADATA = MetadataOracle()
 GRAD = GradOracle()
+GRAPH = GraphOracle()
 CFG = OracleConfig()
 
 
@@ -974,13 +988,369 @@ def test_the_grad_oracle_leaves_the_output_requires_grad_flag_to_metadata():
 
 
 # --------------------------------------------------------------------------
+# graph: breaks, baselines, recompiles, and the repeat call
+#
+# Hand-built GraphHealth records rather than compiled runs, for the reason the
+# module docstring gives: the rules are what has to be pinned down, and which
+# reasons a particular torch reports for a particular fixture is not a rule.
+# The two integration tests further down run tests/fixtures/graph_break.py for
+# real and check that these rules still describe one.
+# --------------------------------------------------------------------------
+
+# The shape of one entry of ExplainOutput.break_reasons, as torch 2.14 fills it
+# in: a multi-line explanation ending in a link whose gbNNNN id names the break
+# class, and a user stack whose last frame is the line that broke.
+PRINT_BREAK = """\
+Failed to trace builtin operator
+  Explanation: Dynamo does not know how to trace builtin operator `print`
+  Hint: Avoid calling builtin `print`.
+
+ For more details about this graph break, please visit: \
+https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0059.html"""
+
+BRANCH_BREAK = "Data-dependent branching\n  Explanation: ... gb/gb0170.html"
+
+PRINT_SUMMARY = "gb0059: Failed to trace builtin operator"
+BRANCH_SUMMARY = "gb0170: Data-dependent branching"
+
+
+def graph_lane(
+    *reasons: str,
+    backend: str = "inductor",
+    break_count: int | None = None,
+    **kwargs: Any,
+) -> BackendResult:
+    """An inductor lane whose only content is its graph health."""
+    breaks = tuple(
+        GraphBreak(reason=reason, user_frame=f"m.py:{index + 1} in forward")
+        for index, reason in enumerate(reasons)
+    )
+    return BackendResult(
+        backend=backend,
+        first_call_s=1.5,
+        second_call_s=0.001,
+        graph_health=GraphHealth(
+            graph_count=len(breaks) + 1,
+            break_count=len(breaks) if break_count is None else break_count,
+            breaks=breaks,
+            op_count=7,
+            unique_graphs_before=3,
+            unique_graphs_after=3,
+            **kwargs,
+        ),
+    )
+
+
+def baseline(*reasons: str, backend: str = "inductor", count: int | None = None) -> Baseline:
+    """A one-backend baseline holding exactly these reason summaries."""
+    return Baseline(
+        path="b.json",
+        entries={
+            backend: BaselineEntry(
+                graph_break_count=len(reasons) if count is None else count,
+                break_reasons=tuple(reasons),
+            )
+        },
+    )
+
+
+def test_a_lane_that_captured_one_graph_says_nothing():
+    assert GRAPH.compare(lane("eager", []), graph_lane(), CFG) == []
+
+
+def test_a_lane_with_no_graph_health_is_not_a_lane_with_no_graph_breaks():
+    # A hand-built record, or an uncompiled lane. Silence rather than a clean
+    # report: the checks table renders it as a dash, not as "pass".
+    assert GRAPH.compare(lane("eager", []), lane("inductor", []), CFG) == []
+
+
+def test_a_graph_break_is_an_info_finding_carrying_the_reason():
+    findings = GRAPH.compare(lane("eager", []), graph_lane(PRINT_BREAK, BRANCH_BREAK), CFG)
+
+    assert [f.severity for f in findings] == ["info", "info"]
+    assert [f.details["reason"] for f in findings] == [PRINT_SUMMARY, BRANCH_SUMMARY]
+    assert "Failed to trace builtin operator" in findings[0].message
+    assert "m.py:1 in forward" in findings[0].message
+    assert findings[0].details["break_count"] == 2
+    assert findings[0].details["compile_wall_s"] == 1.5
+    # PLAN.md "Oracles": graph health is informational, so nothing here is a
+    # divergence and the run stays clean without --fail-on graph.
+    assert findings[0].oracle == "graph"
+    assert findings[0].output_index is None
+
+
+def test_fullgraph_turns_every_break_into_a_fail():
+    findings = GRAPH.compare(
+        lane("eager", []), graph_lane(PRINT_BREAK), OracleConfig(fullgraph=True)
+    )
+
+    assert [f.severity for f in findings] == ["fail"]
+    assert "--fullgraph was requested and the graph broke anyway" in findings[0].message
+
+
+def test_fullgraph_on_a_lane_that_captured_one_graph_is_still_silent():
+    assert GRAPH.compare(lane("eager", []), graph_lane(), OracleConfig(fullgraph=True)) == []
+
+
+def test_a_baseline_that_lists_every_break_produces_nothing():
+    cfg = OracleConfig(baseline=baseline(PRINT_SUMMARY, BRANCH_SUMMARY))
+    assert GRAPH.compare(lane("eager", []), graph_lane(PRINT_BREAK, BRANCH_BREAK), cfg) == []
+
+
+def test_a_baseline_with_fewer_breaks_fails_naming_the_new_reason():
+    cfg = OracleConfig(baseline=baseline(PRINT_SUMMARY))
+    findings = GRAPH.compare(lane("eager", []), graph_lane(PRINT_BREAK, BRANCH_BREAK), cfg)
+
+    assert [f.severity for f in findings] == ["fail"]
+    assert findings[0].details["reason"] == BRANCH_SUMMARY
+    assert "this break is not in b.json" in findings[0].message
+    # And only the new one: PLAN.md "GitHub Action" fails on new breaks only,
+    # because a check that reported the accepted ones every run gets turned off.
+    assert PRINT_SUMMARY not in findings[0].message
+
+
+def test_the_same_reason_breaking_more_often_than_the_baseline_is_a_fail():
+    # No unfamiliar reason, but two of it where the file accepts one: an
+    # additional break is a new break, whatever it is called.
+    cfg = OracleConfig(baseline=baseline(PRINT_SUMMARY, count=1))
+    findings = GRAPH.compare(lane("eager", []), graph_lane(PRINT_BREAK, PRINT_BREAK), cfg)
+
+    assert [f.severity for f in findings] == ["fail"]
+    assert findings[0].details == {
+        "field": "graph_break_count",
+        "expected": 1,
+        "got": 2,
+    }
+    assert "with no reason the baseline does not already list" in findings[0].message
+
+
+def test_a_break_with_no_recorded_reason_is_left_to_the_count_rule():
+    # A break torch counted without saying why has no identity to be new
+    # against, so it neither fails a matching baseline as an unknown reason...
+    cfg = OracleConfig(baseline=baseline(PRINT_SUMMARY, count=3))
+    assert GRAPH.compare(lane("eager", []), graph_lane(PRINT_BREAK, break_count=3), cfg) == []
+    # ...nor gets written into one as a line nobody can act on.
+    entry = baseline_entry(graph_lane(PRINT_BREAK, break_count=3))
+    assert entry == BaselineEntry(graph_break_count=3, break_reasons=(PRINT_SUMMARY,))
+
+
+def test_a_baseline_looser_than_the_run_is_an_info_not_a_fail():
+    cfg = OracleConfig(baseline=baseline(PRINT_SUMMARY, BRANCH_SUMMARY, count=5))
+    findings = GRAPH.compare(lane("eager", []), graph_lane(PRINT_BREAK), cfg)
+
+    assert [f.severity for f in findings] == ["info"]
+    assert "the baseline is looser than this run" in findings[0].message
+
+
+def test_a_baseline_with_no_entry_for_this_lane_is_a_warn_and_not_a_fail():
+    cfg = OracleConfig(baseline=baseline(PRINT_SUMMARY, backend="aot_eager"))
+    findings = GRAPH.compare(lane("eager", []), graph_lane(PRINT_BREAK), cfg)
+
+    assert [f.severity for f in findings] == ["warn", "info"]
+    assert "b.json has no baseline for inductor" in findings[0].message
+
+
+def test_a_break_count_higher_than_the_recorded_reasons_is_still_reported():
+    findings = GRAPH.compare(lane("eager", []), graph_lane(PRINT_BREAK, break_count=3), CFG)
+
+    assert [f.details["reason"] for f in findings] == [
+        PRINT_SUMMARY,
+        "no reason recorded",
+        "no reason recorded",
+    ]
+
+
+def test_a_second_call_that_raised_is_a_graph_fail():
+    other = graph_lane()
+    other.second_call_exception = CapturedException(
+        type="RuntimeError", message="guard failed\nsecond line", traceback=()
+    )
+    findings = GRAPH.compare(lane("eager", []), other, CFG)
+
+    assert [f.severity for f in findings] == ["fail"]
+    assert findings[0].message == (
+        "inductor answered the first call and raised RuntimeError on the repeat "
+        "call with the same inputs: guard failed"
+    )
+    assert findings[0].details["field"] == "second_call"
+
+
+def test_a_recompile_on_the_repeat_call_is_a_warn():
+    other = graph_lane()
+    assert other.graph_health is not None
+    other.graph_health = replace(other.graph_health, unique_graphs_after=5)
+    findings = GRAPH.compare(lane("eager", []), other, CFG)
+
+    assert [f.severity for f in findings] == ["warn"]
+    assert "compiled 2 more graphs on the repeat call" in findings[0].message
+    assert findings[0].details["expected"] == 3
+    assert findings[0].details["got"] == 5
+
+
+def test_an_unreadable_counter_is_not_reported_as_a_recompile():
+    other = graph_lane()
+    assert other.graph_health is not None
+    other.graph_health = replace(other.graph_health, unique_graphs_after=None)
+
+    assert other.graph_health.recompiled is False
+    assert GRAPH.compare(lane("eager", []), other, CFG) == []
+
+
+def test_an_explain_pass_that_raised_is_a_warn_rather_than_a_pass():
+    other = BackendResult(
+        backend="inductor",
+        graph_health=GraphHealth(
+            explain_error=CapturedException(
+                type="TypeError", message="cannot trace this", traceback=()
+            )
+        ),
+    )
+    findings = GRAPH.compare(lane("eager", []), other, CFG)
+
+    assert [f.severity for f in findings] == ["warn"]
+    assert "graph health was not measured for inductor" in findings[0].message
+
+
+def test_a_lane_that_raised_and_could_not_be_traced_is_not_reported_twice():
+    # The target raises, so of course it raised under explain too. That
+    # exception is already reported against the lane and is what the stage
+    # verdict is built from; saying it again here would turn one broken model
+    # into two findings.
+    other = BackendResult(
+        backend="inductor",
+        exception=CapturedException(type="RuntimeError", message="broken", traceback=()),
+        graph_health=GraphHealth(
+            explain_error=CapturedException(type="RuntimeError", message="broken", traceback=())
+        ),
+    )
+    assert GRAPH.compare(lane("eager", []), other, CFG) == []
+
+
+def test_a_negative_break_count_is_floored_before_it_reaches_a_baseline():
+    # torch computes graph_break_count as graph_count - 1, so a callable it
+    # captured nothing for reports -1. GraphHealth floors it in the runner; this
+    # is the rule stated where a baseline would otherwise read it as progress.
+    empty = BackendResult(backend="inductor", graph_health=GraphHealth(break_count=0))
+    entry = baseline_entry(empty)
+
+    assert entry == BaselineEntry(graph_break_count=0, break_reasons=())
+
+
+# --- the reason summary, which is what a baseline compares on ---------------
+
+
+def test_a_reason_summary_is_the_headline_and_the_stable_break_id():
+    assert summarise_reason(PRINT_BREAK) == PRINT_SUMMARY
+    assert summarise_reason(BRANCH_BREAK) == BRANCH_SUMMARY
+
+
+def test_a_reason_with_no_break_id_keeps_its_headline():
+    assert summarise_reason("generic_jump TensorVariable()") == "generic_jump TensorVariable()"
+
+
+def test_a_reason_summary_is_capped_and_never_empty():
+    assert summarise_reason("") == "unknown graph break"
+    assert summarise_reason("   \n\n") == "unknown graph break"
+    assert len(summarise_reason("word " * 200)) == MAX_REASON_CHARS
+    assert summarise_reason("word " * 200).endswith("…")
+
+
+# --- the baseline file ------------------------------------------------------
+
+
+def test_a_baseline_written_from_a_run_reads_back_identically(tmp_path):
+    runset = RunSet(
+        target_name="m:model",
+        device="cpu",
+        seed=0,
+        fullgraph=False,
+        dynamic=False,
+        grad=True,
+        results={
+            "eager": lane("eager", []),
+            "inductor": graph_lane(PRINT_BREAK, BRANCH_BREAK),
+        },
+    )
+    path = tmp_path / "nested" / "baseline.json"
+    assert write_baseline(path, runset) == ["inductor"]
+
+    parsed = read_baseline(path)
+    assert set(parsed.entries) == {"inductor"}
+    assert parsed.entries["inductor"] == BaselineEntry(
+        graph_break_count=2, break_reasons=(PRINT_SUMMARY, BRANCH_SUMMARY)
+    )
+    # Round trip: the file it just wrote silences exactly the breaks it recorded.
+    cfg = OracleConfig(baseline=parsed)
+    assert GRAPH.compare(lane("eager", []), graph_lane(PRINT_BREAK, BRANCH_BREAK), cfg) == []
+
+
+def test_a_lane_whose_graph_health_was_not_measured_is_left_out_of_a_baseline(tmp_path):
+    # A zero-break entry for a lane that never established one would be a
+    # fiction every later run compared against.
+    unmeasured = BackendResult(
+        backend="inductor",
+        graph_health=GraphHealth(
+            explain_error=CapturedException(type="TypeError", message="no", traceback=())
+        ),
+    )
+    runset = RunSet(
+        target_name="m:model",
+        device="cpu",
+        seed=0,
+        fullgraph=False,
+        dynamic=False,
+        grad=True,
+        results={"eager": lane("eager", []), "inductor": unmeasured},
+    )
+    path = tmp_path / "baseline.json"
+
+    assert write_baseline(path, runset) == []
+    assert json.loads(path.read_text()) == {}
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        ("not json at all", "is not valid JSON"),
+        ("[1, 2]", "must be an object keyed by backend name"),
+        ('{"inductor": 3}', "expected an object with graph_break_count"),
+        ('{"inductor": {"graph_break_count": -1}}', "expected a non-negative integer"),
+        ('{"inductor": {"graph_break_count": true}}', "expected a non-negative integer"),
+        ('{"inductor": {"break_reasons": [1]}}', "not a list of strings"),
+    ],
+)
+def test_a_baseline_that_is_not_this_shape_is_refused(tmp_path, content, expected):
+    path = tmp_path / "baseline.json"
+    path.write_text(content)
+
+    with pytest.raises(BaselineError) as excinfo:
+        read_baseline(path)
+    assert expected in str(excinfo.value)
+
+
+def test_a_missing_baseline_names_the_flag_that_writes_one(tmp_path):
+    with pytest.raises(BaselineError) as excinfo:
+        read_baseline(tmp_path / "absent.json")
+    assert "write one first with --write-baseline" in str(excinfo.value)
+
+
+def test_a_baseline_entry_ignores_keys_it_does_not_know(tmp_path):
+    # A file written by a later version still reads here; a wrong shape does not.
+    path = tmp_path / "baseline.json"
+    path.write_text('{"inductor": {"graph_break_count": 1, "break_reasons": ["x"], "torch": "2"}}')
+
+    assert read_baseline(path).entries["inductor"].break_reasons == ("x",)
+
+
+# --------------------------------------------------------------------------
 # the registry
 # --------------------------------------------------------------------------
 
 
 def test_the_registry_is_a_subset_of_the_fail_on_vocabulary():
     assert set(ORACLES) <= set(ORACLE_NAMES)
-    assert list(ORACLES) == ["numerics", "alias", "metadata", "grad"]
+    # All five since M3-1, in the order PLAN.md "Oracles" lists them.
+    assert list(ORACLES) == list(ORACLE_NAMES)
     for name, oracle in ORACLES.items():
         assert isinstance(oracle, Oracle)
         assert oracle.name == name
@@ -993,9 +1363,10 @@ def test_run_oracles_selects_by_name():
     everything = run_oracles(eager, other, CFG)
     assert {finding.oracle for finding in everything} == {"numerics", "metadata"}
     assert {f.oracle for f in run_oracles(eager, other, CFG, ["metadata"])} == {"metadata"}
-    # A category no oracle implements yet contributes nothing, rather than
-    # raising: cli.parse_fail_on is where an unknown name is reported.
-    assert run_oracles(eager, other, CFG, ["grad"]) == []
+    # An oracle with nothing to say contributes nothing, rather than raising:
+    # cli.parse_fail_on is where an unknown name is reported. These two lanes
+    # carry no gradients and no graph health, so both are silent.
+    assert run_oracles(eager, other, CFG, ["grad", "graph"]) == []
 
 
 # --------------------------------------------------------------------------
@@ -1017,6 +1388,67 @@ def test_a_clean_model_produces_no_fail_findings(mlp_runset):
         OracleConfig(fp64=True, fp64_reference=mlp_runset.fp64),
     )
     assert [finding for finding in findings if finding.severity == "fail"] == []
+
+
+def test_the_graph_oracle_is_silent_on_a_model_that_captures_in_one_graph(mlp_runset):
+    inductor = mlp_runset.results["inductor"]
+    assert GRAPH.compare(mlp_runset.results["eager"], inductor, CFG) == []
+    # Not vacuous: the explain pass really ran and really found one graph.
+    assert inductor.graph_health is not None
+    assert inductor.graph_health.measured is True
+    assert (inductor.graph_health.graph_count, inductor.graph_health.break_count) == (1, 0)
+    assert inductor.graph_health.op_count > 0
+    # And the eager lane has no graph health at all: it was never compiled.
+    assert mlp_runset.results["eager"].graph_health is None
+
+
+@pytest.fixture(scope="module")
+def graph_break_runset():
+    """The deliberate-break fixture, run under inductor once."""
+    target = load_target(str(FIXTURES / "graph_break.py"))
+    return run_all(target, ["eager", "inductor"], seed=0)
+
+
+def test_a_real_graph_break_reaches_the_oracle_with_its_reason_and_its_line(graph_break_runset):
+    eager, inductor = graph_break_runset.results["eager"], graph_break_runset.results["inductor"]
+    assert inductor.graph_health is not None
+    findings = GRAPH.compare(eager, inductor, CFG)
+
+    assert {f.severity for f in findings} == {"info"}
+    reasons = " ".join(f.details["reason"] for f in findings)
+    assert "Failed to trace builtin operator" in reasons
+    assert all("graph_break.py" in str(f.details["user_frame"]) for f in findings)
+    # PLAN.md "graph": a break is not a bug. The answers still match, so no
+    # other oracle has anything to say about this lane.
+    assert [f for f in run_oracles(eager, inductor, CFG) if f.severity == "fail"] == []
+
+
+def test_a_real_break_under_fullgraph_is_a_fail_on_a_lane_that_raised():
+    # The shape of cases/distributions_validation_branch.py, at fixture size:
+    # fullgraph=True makes the break a hard error, so the lane produces nothing
+    # for the other four oracles and the graph oracle is the only one that can
+    # say why. That is why it does not stop at a lane that raised.
+    target = load_target(str(FIXTURES / "graph_break.py"))
+    runset = run_all(target, ["eager", "inductor"], seed=0, fullgraph=True)
+    eager, inductor = runset.results["eager"], runset.results["inductor"]
+    assert not inductor.ok
+
+    findings = GRAPH.compare(eager, inductor, OracleConfig(fullgraph=True))
+    assert {f.severity for f in findings} == {"fail"}
+    assert "--fullgraph was requested and the graph broke anyway" in findings[0].message
+    # The correctness oracles have nothing to compare, and say nothing.
+    assert [f for f in run_oracles(eager, inductor, CFG) if f.oracle != "graph"] == []
+
+
+def test_a_baseline_written_from_a_real_run_silences_that_run(tmp_path, graph_break_runset):
+    path = tmp_path / "baseline.json"
+    assert write_baseline(path, graph_break_runset) == ["inductor"]
+    entry = read_baseline(path).entries["inductor"]
+    assert entry.graph_break_count == 2
+
+    cfg = OracleConfig(baseline=read_baseline(path))
+    eager, inductor = graph_break_runset.results["eager"], graph_break_runset.results["inductor"]
+    assert GRAPH.compare(eager, inductor, cfg) == []
 
 
 def test_the_grad_oracle_is_silent_on_a_clean_model(mlp_runset):
