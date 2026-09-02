@@ -85,9 +85,6 @@ select = [
 [tool.ruff.lint.per-file-ignores]
 "src/compile_check/cli.py" = ["T20"]
 "src/compile_check/report/*.py" = ["T20"]
-# report/json.py is named after the artifact it writes, per PLAN.md "Package
-# layout"; the stdlib module stays reachable because imports are absolute.
-"src/compile_check/report/json.py" = ["A005"]
 "tests/*.py" = ["T20"]
 
 [tool.ruff.lint.isort]

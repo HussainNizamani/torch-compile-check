@@ -6,6 +6,10 @@ block (architecture always included, see cross-architecture parity), the run
 configuration, and one record per backend per oracle with a machine-readable
 finding list. This is the CI-consumable artifact, and it is the unit of
 comparison for cross-architecture parity.
+
+The module is named after the artifact it writes, following PLAN.md "Package
+layout"; the stdlib ``json`` module stays reachable from it because imports are
+absolute.
 """
 
 from __future__ import annotations
