@@ -134,6 +134,7 @@ compile-check path/to/file.py [options]
 | `--device cpu\|cuda` | device to place the model and inputs on, default cpu |
 | `--json out.json` | write the versioned JSON result |
 | `--md report.md` | write the Markdown issue draft |
+| `--emit-test test_case.py` | write the top finding as a regression test in the inductor suite's eager-vs-compiled idiom (M3-2) |
 | `--fail-on numerics,alias,metadata,grad,graph` | which oracle categories turn a finding into exit code 1 |
 | `--fullgraph` | pass `fullgraph=True` to `torch.compile`, default is False |
 | `--dynamic` | add a second pass with `dynamic=True` |
