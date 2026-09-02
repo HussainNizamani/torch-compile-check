@@ -87,11 +87,36 @@ All notable changes to this project are documented here. The format follows
   against a float32 atol of 1e-5 and the same run flip between clean and
   failing. The tolerances for outputs are unchanged, and the report's
   environment block records the factor the gradients were compared under. Ten
-  clears the measured borderline case and not every model: a whole resnet18
-  backward at 2x3x64x64 needs about 161x on torch 2.14.0+cpu/aarch64, and a
-  float64 reference puts eager and inductor at the same order of error (3.4e-5
-  against 3.9e-5), so that is the float32 noise floor rather than a miscompile.
-  PLAN.md "Tolerance policy" is what this measurement feeds.
+  clears the measured borderline case and not every model: a resnet18 backward
+  at 2x3x64x64 on torch 2.14.0+cpu/aarch64 needs 1x in eval mode and about 161x
+  in train mode, where batch norm sends every gradient back through statistics
+  computed from the batch. A float64 reference puts eager and inductor at the
+  same order of error there (3.4e-5 against 3.9e-5), so that is the float32
+  noise floor of a deep backward rather than a miscompile. PLAN.md "Tolerance
+  policy" is what this measurement feeds.
+- `cases/markers.py`: the known-bad version marker PLAN.md "Regression corpus"
+  asks for, as a table rather than as prose in five docstrings. Per case: the
+  torch versions and build commits a RED was measured on, the fix PR and where
+  it landed, and `expected_verdict(case, torch_version, git_version)` returning
+  `RED`, `GREEN`, or `UNKNOWN`. A release compares by version number, a nightly
+  by its date, and a build that cannot be placed against a known fix comes back
+  `UNKNOWN` rather than being guessed at.
+- `cases/summary.py` and `python -m cases.summary`: run every standalone case
+  and print one Markdown table of observed against expected. CI appends it to
+  the job summary on every matrix cell, so "which of these bugs does this torch
+  still have" is answered on the job page.
+- `tests/test_corpus_markers.py`: the marker against the live verdict, per case,
+  with a disagreement raised as a warning rather than a failure -- a nightly
+  that fixes a bug upstream must not break this repository. Prints
+  `CORPUS <case> observed=... expected=... torch=...` for every case so a CI log
+  can be grepped, and tests the version arithmetic against version strings
+  rather than against the installed torch.
+- `tests/test_corpus_oracles.py`: every corpus case through the runner and every
+  oracle in one parametrized test, graded against the case's own `check()`. RED
+  means at least one fail finding from the oracle that case belongs to, GREEN
+  means none, and the stage verdict must name the first lane that broke. It
+  replaces four hand-written per-case integration tests and covers the two cases
+  they never reached.
 - Tooling: ruff lint and format, mypy strict over `src/`, pytest, pre-commit, a
   `Makefile`, and a GitHub Actions matrix over Python 3.10 to 3.13 and torch
   stable and nightly on CPU.
