@@ -20,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-__all__ = ["BackendResult", "CapturedException", "RunSet"]
+__all__ = ["BackendResult", "CapturedException", "RunSet", "TensorMeta"]
 
 # PLAN.md M1-1 brief: an exception is recorded with its first 20 traceback lines,
 # enough to name the failing frame without pasting a whole inductor stack into a
@@ -45,6 +45,36 @@ class CapturedException:
 
     traceback: tuple[str, ...]
     """The first :data:`TRACEBACK_LINES` lines of the formatted traceback."""
+
+
+@dataclass(frozen=True)
+class TensorMeta:
+    """Where one tensor's bytes were, at one moment, as plain data.
+
+    PLAN.md "alias" needs `storage_offset`, `stride`, `shape`, and the element
+    size to decide whether two tensors overlap, and PLAN.md "Verified API
+    surface" confirms every field below against the installed wheel. A clone
+    cannot stand in for this: `Tensor.clone()` keeps the values but is free to
+    pick its own layout, so the stride of a snapshot is the snapshot's stride
+    and not the input's.
+
+    Recorded before and after each call so the alias oracle of M2 can tell a
+    value mutation (`copy_`) from a metadata mutation (`resize_`,
+    `as_strided_`), which no comparison of the two clones can.
+    """
+
+    shape: tuple[int, ...]
+    stride: tuple[int, ...]
+    dtype: str
+    """``str(tensor.dtype)``, so this record never holds a torch object."""
+
+    storage_offset: int
+    data_ptr: int
+    """The tensor's own first byte. An address, so it is comparable within one
+    run (did this call reallocate?) and meaningless between two."""
+
+    storage_ptr: int
+    """``untyped_storage().data_ptr()``: which buffer the tensor lives in."""
 
 
 @dataclass
@@ -87,6 +117,16 @@ class BackendResult:
     The snapshot is taken after the first call and before the repeat call, so a
     mutation is recorded once rather than applied twice.
     """
+
+    input_meta_before: list[TensorMeta | None] = field(default_factory=list)
+    """Layout of every input leaf before the first call, index-aligned with
+    :attr:`inputs_before`. ``None`` for a leaf that is not a tensor, or whose
+    layout does not answer (a sparse or nested tensor): a fact the runner could
+    not read must not read as a fact that changed."""
+
+    input_meta_after: list[TensorMeta | None] = field(default_factory=list)
+    """The same, taken with :attr:`inputs_after`. The pair is what tells a
+    ``resize_`` or an ``as_strided_`` from a plain in-place write."""
 
     input_refs: list[Any] = field(default_factory=list)
     """The input leaves as live references, in the same order.

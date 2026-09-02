@@ -208,6 +208,67 @@ def test_inputs_are_isolated_between_backends():
     torch.testing.assert_close(other.outputs[0], original.sum())
 
 
+def test_the_layout_of_every_input_is_recorded_around_the_call():
+    target = load_target(str(FIXTURES / "mutating.py"))
+    result = run_all(target, ["eager"]).results["eager"]
+
+    assert result.ok, result.exception
+    before, after = result.input_meta_before[0], result.input_meta_after[0]
+    assert before is not None and after is not None
+    assert before.shape == (3, 4)
+    assert before.stride == (4, 1)
+    assert before.dtype == "torch.float32"
+    assert before.storage_offset == 0
+    assert before.storage_ptr != 0
+    # zero_() writes in place: the values moved and the layout did not.
+    assert (after.shape, after.stride, after.dtype) == (before.shape, before.stride, before.dtype)
+    assert after.data_ptr == before.data_ptr
+    assert not torch.equal(result.inputs_before[0], result.inputs_after[0])
+
+
+def test_an_in_place_resize_shows_up_in_the_layout_records():
+    # The record exists because a clone cannot stand in for it: Tensor.clone()
+    # keeps the values and is free to pick its own stride, so a resize_ or an
+    # as_strided_ is only visible in what the runner read off the input itself.
+    def resize_the_input(x: torch.Tensor) -> torch.Tensor:
+        total = x.sum()
+        x.resize_(2, 6)
+        return total
+
+    target = Target(fn=resize_the_input, example_inputs=(torch.ones(3, 4),), name="inline:resize")
+    result = run_all(target, ["eager"], grad=False).results["eager"]
+
+    assert result.ok, result.exception
+    before, after = result.input_meta_before[0], result.input_meta_after[0]
+    assert before is not None and after is not None
+    assert (before.shape, before.stride) == ((3, 4), (4, 1))
+    assert (after.shape, after.stride) == ((2, 6), (6, 1))
+
+
+def test_a_non_tensor_input_leaf_has_no_layout_record():
+    target = Target(
+        fn=lambda x, scale: x * scale,
+        example_inputs=(torch.ones(2), 3),
+        name="inline:scaled",
+    )
+    result = run_all(target, ["eager"]).results["eager"]
+
+    assert result.ok, result.exception
+    assert [meta is None for meta in result.input_meta_before] == [False, True]
+    assert len(result.input_meta_after) == len(result.inputs_after)
+
+
+def test_the_layout_records_survive_a_backend_that_raised():
+    target = load_target(str(FIXTURES / "raises.py"))
+    result = run_all(target, ["eager"]).results["eager"]
+
+    assert not result.ok
+    # The mutation oracle must still be able to say what the inputs looked like
+    # when a lane blew up halfway through writing into them.
+    assert len(result.input_meta_before) == 1
+    assert len(result.input_meta_after) == 1
+
+
 def test_keyword_inputs_are_passed_as_keywords():
     target = load_target(str(FIXTURES / "kwargs_target.py"))
     result = run_all(target, ["eager"]).results["eager"]
