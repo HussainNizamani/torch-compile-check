@@ -174,6 +174,34 @@ merge order.
   through the runner and every oracle in one parametrized test, graded against
   the case's own `check()`, replacing four hand-written per-case integration
   tests and covering the two cases they never reached.
+- **M3-1** (PR #13): the graph health oracle, the fifth and last of PLAN.md
+  "Oracles". Every compiled lane is traced once more under
+  `torch._dynamo.explain`, and the report gets the graph count, the break
+  count, and one finding per break naming the reason and the user line it
+  happened on. Graph breaks are `info` by default, because a break is a slower
+  plan rather than a wrong answer; three things make one a `fail`:
+  `--fullgraph` was asked for and the graph broke anyway, a `--baseline` was
+  given and a break appeared that is not in it, or the lane answered the first
+  call and raised on the repeat call. A recompile across the repeat call with
+  identical inputs -- `counters['stats']['unique_graphs']` moving -- is a
+  `warn`. `--fail-on graph` is what turns any of it into exit code 1, as for
+  every other oracle. `--baseline FILE` and `--write-baseline FILE`: PLAN.md
+  "GitHub Action"'s fail-on-new-breaks-only mode, and the flag that records the
+  file to compare against -- the format is `{backend: {graph_break_count,
+  break_reasons[]}}`, small enough to review in a pull request; a break already
+  listed produces no finding at all, and a baseline that is missing or
+  malformed is exit 2 rather than a silently empty comparison. The graph oracle
+  also takes over repeat-call health, which M1-3 recorded and left unowned: a
+  lane that answers once and then raises is now a fail-severity graph finding.
+  Graph findings never move the stage verdict -- `BackendSummary.graph_fail`
+  counts them, the stage block says why they are not there, and `--fail-on
+  graph` still decides the exit code. The environment block reports the module
+  handling that actually happened: a module that refused `copy.deepcopy` now
+  reads "shared across every lane (deep copy failed: <reason>)" instead of a
+  wrong "deep copied per lane" row, and a plain callable is no longer claimed
+  to have been copied either. `tests/fixtures/graph_break.py`: a target with a
+  deliberate `print` break and a deliberate data-dependent branch. All five
+  oracles now run.
 
 ### Fixed
 

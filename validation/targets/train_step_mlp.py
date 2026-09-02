@@ -1,17 +1,14 @@
-"""A full training step -- forward, loss, and (once the grad oracle lands)
-backward -- as a validation target.
+"""A full training step -- forward, loss, and backward -- as a validation target.
 
 PLAN.md "grad" describes the oracle this exercises: reduce the differentiable
 outputs to a scalar, call ``backward()``, and compare both the values and the
 set of tensors that received a gradient, between eager and each compiled
-backend. That oracle is a stub today ("not yet" in the checks table until
-M2-2), but the runner already runs the backward pass unconditionally
-whenever an input or a parameter requires grad (``runner.py``'s
-``_run_backward``, which every other target in this suite also triggers by
-having trainable parameters), so this target is real work today, not a
-placeholder: it forces the compiler through the backward graph for a
-training-shaped computation, and the moment the oracle lands, this file
-starts reporting grad findings with no change needed.
+backend. That oracle landed in M2-2 and reports on this target directly. The
+runner runs the backward pass whenever an input or a parameter requires grad
+(``runner.py``'s ``_run_backward``, which every other target in this suite also
+triggers by having trainable parameters); what this file adds is the shape,
+forcing the compiler through the backward graph of a training-shaped
+computation rather than of a bare forward.
 
 The whole training step -- linear layers, ReLU, and the cross-entropy loss
 -- is the module's ``forward()``, deliberately, rather than a bare `fn` that

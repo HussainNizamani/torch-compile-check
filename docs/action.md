@@ -98,6 +98,29 @@ file. The correctness categories (`numerics`, `alias`, `metadata`, `grad`)
 always fail regardless of any baseline — there is no such thing as an
 acceptable baseline of wrong answers.
 
+Produce the file with the CLI's `--write-baseline`, once per target, and
+commit what it writes:
+
+```console
+$ compile-check models/classifier.py --write-baseline .compile-check/baseline.json
+$ cat .compile-check/baseline.json
+{
+  "inductor": {
+    "break_reasons": [
+      "gb0059: Failed to trace builtin operator"
+    ],
+    "graph_break_count": 1
+  }
+}
+```
+
+It is keyed by backend, so regenerate it when you change `backends`; a run
+whose lane is missing from the file reports a warning and falls back to
+listing the breaks rather than failing the job on an incomplete baseline.
+Break reasons are torch's own wording, so a torch upgrade that rewords one
+can show as a new break — keep a baseline per torch version in a matrix, or
+regenerate after an upgrade.
+
 ## Compile caches
 
 The action disables `torch.compile`'s caches by default (the CLI sets
