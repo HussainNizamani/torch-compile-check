@@ -473,6 +473,12 @@ def test_the_tool_reports_the_copyback_alias_case_end_to_end(capsys):
     assert "compiled_relation" in out
     # aot_eager agrees with eager, which is what makes the verdict inductor's.
     assert "first diverges at inductor, which implicates inductor lowering/codegen" in out
+    # Nothing else fired, so the alias category is what drove the exit code, and
+    # naming only that category still exits 1.
+    assert "numerics  yes      pass              pass" in out
+    assert "metadata  yes      pass              pass" in out
+    assert main([str(CASES / "alias_copyback.py"), "--fail-on", "alias"]) == EXIT_FINDING
+    capsys.readouterr()
 
 
 def test_a_backend_that_really_raised_exits_one_whatever_fail_on_says(capsys):
