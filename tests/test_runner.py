@@ -10,12 +10,13 @@ import logging
 import os
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import torch
 
 from compile_check.discover import Target, load_target
-from compile_check.results import TRACEBACK_LINES, BackendResult, RunSet
+from compile_check.results import TRACEBACK_LINES, BackendResult, GraphBreak, RunSet
 from compile_check.runner import (
     ABLATION_LADDER,
     CACHE_ENV_VAR,
@@ -302,6 +303,26 @@ def test_a_module_that_cannot_be_copied_is_shared_with_a_warning(caplog):
     assert runset.results["eager"].ok
     assert "could not be deep copied" in caplog.text
     assert "RuntimeError" in caplog.text
+    # M3-1: recorded on the run and not only in the log, because the report's
+    # environment block has to say what actually happened to the module.
+    assert runset.module_copy_error == "RuntimeError: this module refuses to be copied"
+    assert runset.target_is_module is True
+
+
+def test_a_module_that_copies_cleanly_records_no_copy_error():
+    target = load_target(str(FIXTURES / "mlp.py"))
+    runset = run_all(target, ["eager"], grad=False)
+
+    assert runset.target_is_module is True
+    assert runset.module_copy_error is None
+
+
+def test_a_plain_callable_is_recorded_as_not_being_a_module():
+    target = Target(fn=torch.sin, example_inputs=(torch.ones(3),), name="inline:sin")
+    runset = run_all(target, ["eager"], grad=False)
+
+    assert runset.target_is_module is False
+    assert runset.module_copy_error is None
 
 
 def test_a_plain_callable_is_not_copied_per_lane():
@@ -429,9 +450,12 @@ def test_seeding_is_reapplied_per_backend():
     )
 
 
-def test_the_compiler_is_reset_once_per_backend(monkeypatch):
+def test_the_compiler_is_reset_before_every_lane_and_every_explain_pass(monkeypatch):
     # PLAN.md "Runner semantics": each backend runs after a reset, so no
-    # compiled artifact or guard from a previous backend is reused.
+    # compiled artifact or guard from a previous backend is reused. Since M3-1 a
+    # compiled lane also gets an explain pass, which is a trace of its own and
+    # is reset for the same reason -- two resets for aot_eager, one for eager,
+    # which is never compiled and so gets no explain pass.
     calls = []
     real_reset = torch.compiler.reset
 
@@ -443,7 +467,7 @@ def test_the_compiler_is_reset_once_per_backend(monkeypatch):
     target = Target(fn=torch.sin, example_inputs=(torch.ones(3),), name="inline:sin")
     run_all(target, ["eager", "aot_eager"])
 
-    assert len(calls) == 2
+    assert len(calls) == 3
 
 
 def test_unknown_backends_are_rejected_before_anything_runs():
@@ -517,3 +541,164 @@ def test_a_plain_callable_needs_no_copy_to_run_at_float64():
     assert result.ok, result.exception
     assert result.outputs[0].dtype == torch.float64
     torch.testing.assert_close(result.outputs[0], torch.sin(torch.ones(3, dtype=torch.float64)))
+
+
+# --- graph health: the explain pass and the recompile counter ---------------
+
+
+def test_a_compiled_lane_carries_graph_health_and_an_eager_lane_does_not(mlp_runset):
+    # PLAN.md "graph": the counts come from torch._dynamo.explain, which is only
+    # meaningful for a lane that went through torch.compile at all.
+    assert mlp_runset.results["eager"].graph_health is None
+
+    health = mlp_runset.results["inductor"].graph_health
+    assert health is not None
+    assert health.measured is True
+    assert (health.graph_count, health.break_count, health.breaks) == (1, 0, ())
+    assert health.op_count > 0
+    assert health.compile_times is not None
+    # PLAN.md "graph": identical inputs must not produce a new graph.
+    assert health.unique_graphs_before == health.unique_graphs_after
+    assert health.recompiled is False
+
+
+def test_a_real_graph_break_is_recorded_with_its_reason_and_its_line():
+    target = load_target(str(FIXTURES / "graph_break.py"))
+    health = run_all(target, ["inductor"], seed=0, grad=False).results["inductor"].graph_health
+
+    assert health is not None
+    assert health.graph_count == 3
+    assert health.break_count == 2
+    assert "Failed to trace builtin operator" in health.breaks[0].reason
+    assert "tests/fixtures/graph_break.py:" in str(health.breaks[0].user_frame)
+    assert "in fn" in str(health.breaks[0].user_frame)
+
+
+def test_the_explain_pass_runs_even_when_the_lane_raised():
+    # Under --fullgraph a break is a hard error, so the lane produces nothing;
+    # the explain pass does not ask for fullgraph and is what names the break.
+    target = load_target(str(FIXTURES / "graph_break.py"))
+    result = run_all(target, ["inductor"], seed=0, grad=False, fullgraph=True).results["inductor"]
+
+    assert not result.ok
+    assert result.graph_health is not None
+    assert result.graph_health.break_count == 2
+    # No repeat call happened, so there is no recompile sample to read.
+    assert result.graph_health.unique_graphs_before is None
+    assert result.graph_health.recompiled is False
+
+
+def test_the_explain_pass_gets_its_own_inputs_so_a_mutation_is_not_applied_twice():
+    # It is a third call through the target. A target that writes to its inputs
+    # would otherwise mutate the very tensors the alias oracle reads.
+    def mutates(x):
+        x.add_(1)
+        return x * 2
+
+    target = Target(fn=mutates, example_inputs=(torch.zeros(3),), name="inline:mutates")
+    result = run_all(target, ["aot_eager"], grad=False).results["aot_eager"]
+
+    assert result.graph_health is not None
+    # The snapshot is taken after the measured call, so it records one add.
+    torch.testing.assert_close(result.inputs_after[0], torch.full((3,), 1.0))
+    # The live leaf saw the measured call and the repeat call, and nothing else:
+    # a third add here would be the explain pass writing through it.
+    torch.testing.assert_close(result.input_refs[0], torch.full((3,), 2.0))
+
+
+def test_an_explain_pass_that_raises_is_recorded_rather_than_propagated(monkeypatch):
+    def exploding_explain(_fn):
+        def inner(*args, **kwargs):
+            raise RuntimeError("explain itself blew up")
+
+        return inner
+
+    monkeypatch.setattr(torch._dynamo, "explain", exploding_explain)
+    target = Target(fn=torch.sin, example_inputs=(torch.ones(3),), name="inline:sin")
+    result = run_all(target, ["aot_eager"], grad=False).results["aot_eager"]
+
+    assert result.ok
+    assert result.graph_health is not None
+    assert result.graph_health.measured is False
+    assert result.graph_health.explain_error is not None
+    assert result.graph_health.explain_error.type == "RuntimeError"
+
+
+def explained(monkeypatch, **fields):
+    """Stand ``torch._dynamo.explain`` down and hand the runner this instead.
+
+    A synthetic ExplainOutput, duck-typed the way :func:`_graph_health` reads
+    one. Some of what it has to handle is torch's own arithmetic rather than
+    anything a fixture can be written to trigger, and the rest is a field that
+    an older or newer torch may not carry at all.
+    """
+    monkeypatch.setattr(
+        torch._dynamo, "explain", lambda _fn: lambda *a, **k: SimpleNamespace(**fields)
+    )
+    target = Target(fn=torch.sin, example_inputs=(torch.ones(3),), name="inline:sin")
+    return run_all(target, ["aot_eager"], grad=False).results["aot_eager"].graph_health
+
+
+def test_a_negative_graph_break_count_is_floored_to_zero(monkeypatch):
+    # torch computes graph_break_count as graph_count - 1, so a callable it
+    # captured no graph for reports -1, which is "nothing was traced" and not
+    # "minus one break". A negative count would read against a baseline as an
+    # improvement.
+    health = explained(
+        monkeypatch,
+        graph_count=0,
+        graph_break_count=-1,
+        break_reasons=[],
+        op_count=0,
+        compile_times="TorchDynamo compilation metrics:",
+    )
+
+    assert health is not None
+    assert (health.graph_count, health.break_count) == (0, 0)
+
+
+def test_a_synthetic_break_reason_is_read_through_its_public_fields(monkeypatch):
+    frame = SimpleNamespace(filename="/repo/m.py", lineno=12, name="forward")
+    health = explained(
+        monkeypatch,
+        graph_count=3,
+        graph_break_count=2,
+        break_reasons=[
+            SimpleNamespace(reason="Data-dependent branching", user_stack=[frame, frame]),
+            SimpleNamespace(reason="Failed to trace builtin operator", user_stack=[]),
+        ],
+        op_count=9,
+        compile_times=None,
+    )
+
+    assert health is not None
+    assert (health.graph_count, health.break_count, health.op_count) == (3, 2, 9)
+    assert len(health.breaks) == 2
+    # The last frame of the stack, which is the one closest to the break.
+    assert health.breaks[0] == GraphBreak(
+        reason="Data-dependent branching", user_frame="/repo/m.py:12 in forward"
+    )
+    # A reason with no user stack still produces a record: the text is most of
+    # the value, and a missing stack is not a reason to drop the break.
+    assert health.breaks[1] == GraphBreak(
+        reason="Failed to trace builtin operator", user_frame=None
+    )
+
+
+def test_a_break_count_lower_than_the_reasons_is_floored_to_the_reasons(monkeypatch):
+    # The other end of torch's graph_count - 1 arithmetic, measured on
+    # cases/distributions_binomial_kl.py: a break whose resumption produced no
+    # second graph comes back as graph_count 1, graph_break_count 0, and one
+    # recorded reason. A count of zero there would write a baseline saying the
+    # lane traced cleanly.
+    health = explained(
+        monkeypatch,
+        graph_count=1,
+        graph_break_count=0,
+        break_reasons=[SimpleNamespace(reason="Data-dependent branching", user_stack=[])],
+        op_count=6,
+        compile_times=None,
+    )
+
+    assert health is not None
+    assert health.break_count == 1

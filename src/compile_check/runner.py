@@ -10,6 +10,12 @@ runs after ``torch.compiler.reset()``, caches are disabled by default, the eager
 run is the reference world, and each backend is called twice so the graph oracle
 can see whether a recompile happened.
 
+A compiled lane is traced a third time, under ``torch._dynamo.explain``, which
+is where the graph counts and break reasons of PLAN.md "graph" come from. That
+pass runs last and against its own input clones, so nothing an earlier oracle
+reads can be disturbed by it; :func:`_graph_health` states the rest of the
+reasoning.
+
 Torch is imported inside the functions, never at module scope, so that importing
 this module (and therefore ``compile_check.cli``) does not pay for the torch
 import; a test in tests/test_cli.py enforces it.
@@ -36,6 +42,8 @@ from compile_check.results import (
     TRACEBACK_LINES,
     BackendResult,
     CapturedException,
+    GraphBreak,
+    GraphHealth,
     RunSet,
     TensorMeta,
 )
@@ -254,6 +262,7 @@ def run_all(
         dynamic=dynamic,
         grad=grad,
         share_module=share_module,
+        target_is_module=isinstance(fn, torch.nn.Module),
         env=collect_environment(),
     )
     if fp64:
@@ -266,8 +275,11 @@ def run_all(
         )
     for backend in backends:
         log.debug("running backend %s", backend)
+        lane_fn, copy_error = _lane_module(torch, fn, share_module)
+        if copy_error is not None:
+            runset.module_copy_error = copy_error
         runset.results[backend] = run_backend(
-            _lane_module(torch, fn, share_module),
+            lane_fn,
             target.example_inputs,
             backend,
             kwargs=target.kwargs,
@@ -280,7 +292,7 @@ def run_all(
     return runset
 
 
-def _lane_module(torch: Any, fn: Any, share: bool) -> Any:
+def _lane_module(torch: Any, fn: Any, share: bool) -> tuple[Any, str | None]:
     """The module object one lane runs against: its own copy, or the shared one.
 
     PLAN.md "Runner semantics" isolates the *inputs* per backend so that a
@@ -300,11 +312,18 @@ def _lane_module(torch: Any, fn: Any, share: bool) -> Any:
 
     A plain callable is handed back as it is. A function has no state to isolate,
     and PLAN.md's discovery convention makes ``nn.Module`` the stateful case.
+
+    Returns:
+        The object this lane runs against, and the reason the copy did not
+        happen when one was wanted -- ``None`` when it did, or when there was
+        nothing to copy. The reason is carried out rather than only logged
+        because the report's environment block has to state what actually
+        happened, not what the flags asked for (M3 brief).
     """
     if share or not isinstance(fn, torch.nn.Module):
-        return fn
+        return fn, None
     try:
-        return copy.deepcopy(fn)
+        return copy.deepcopy(fn), None
     except Exception as exc:
         # Not fatal: a module that refuses to be copied still runs, and a lane
         # that shares state is better than a run that does not happen. Said out
@@ -316,7 +335,7 @@ def _lane_module(torch: Any, fn: Any, share: bool) -> Any:
             type(exc).__name__,
             exc,
         )
-        return fn
+        return fn, f"{type(exc).__name__}: {exc}"
 
 
 def run_fp64_reference(
@@ -462,6 +481,20 @@ def run_backend(
         result.exception = _capture(exc)
         _record_inputs_after(torch, result, leaves)
         log.debug("backend %s raised %s", backend, type(exc).__name__)
+        # Measured even here, and especially here: under --fullgraph the lane
+        # raises *because* the graph broke, and the explain pass below is what
+        # names the line it broke on. There was no repeat call, so there is no
+        # recompile sample to carry.
+        result.graph_health = _graph_health(
+            torch,
+            fn,
+            example_inputs,
+            kwargs or {},
+            backend=backend,
+            device=device,
+            seed=seed,
+            unique_graphs=(None, None),
+        )
         return result
     result.first_call_s = time.perf_counter() - started
 
@@ -485,6 +518,11 @@ def run_backend(
     # Its output is deliberately discarded, but a failure is not: a lane that
     # answers once and then raises is recorded on the result so the graph oracle
     # and the report can say so.
+    #
+    # PLAN.md "graph": the recompile signal is counters['stats']['unique_graphs']
+    # sampled around exactly this call. Identical inputs must not produce a new
+    # graph, so the counter moving here is the recompile the oracle reports.
+    unique_before = _unique_graphs(torch)
     started = time.perf_counter()
     try:
         call(*args, **call_kwargs)
@@ -497,10 +535,141 @@ def run_backend(
             type(exc).__name__,
             exc,
         )
+    unique_after = _unique_graphs(torch)
 
     if grad:
         _run_backward(torch, fn, result)
+
+    # Last, because it runs the target a third time. Everything the other
+    # oracles read -- the outputs, the input snapshots, the gradients -- has
+    # been taken by now, so a target that mutates state cannot reach any of it.
+    result.graph_health = _graph_health(
+        torch,
+        fn,
+        example_inputs,
+        kwargs or {},
+        backend=backend,
+        device=device,
+        seed=seed,
+        unique_graphs=(unique_before, unique_after),
+    )
     return result
+
+
+def _unique_graphs(torch: Any) -> int | None:
+    """``counters['stats']['unique_graphs']``, or ``None`` if it cannot be read.
+
+    PLAN.md "Verified API surface" confirms the counter on the installed wheel.
+    It is a private dict of a private module all the same, so a torch that moved
+    it leaves the recompile question unanswered rather than failing the run.
+    """
+    del torch  # the counters live on a module of their own, not on the namespace
+    try:
+        utils = importlib.import_module("torch._dynamo.utils")
+        return int(utils.counters["stats"]["unique_graphs"])
+    except Exception as exc:
+        log.debug("no unique_graphs counter on this torch: %s", exc)
+        return None
+
+
+def _graph_health(
+    torch: Any,
+    fn: Any,
+    example_inputs: Sequence[Any],
+    kwargs: dict[str, Any],
+    *,
+    backend: str,
+    device: str,
+    seed: int,
+    unique_graphs: tuple[int | None, int | None],
+) -> GraphHealth | None:
+    """Trace the target under ``torch._dynamo.explain`` and record what it saw.
+
+    PLAN.md "graph": the counts come from ``ExplainOutput`` -- ``graph_count``,
+    ``graph_break_count``, ``break_reasons``, ``op_count``, ``compile_times`` --
+    and the recompile signal from the counter sampled around the repeat call,
+    which the caller has already taken and passes in.
+
+    Three decisions worth stating, because each one is a choice and not a
+    detail.
+
+    The pass gets its own clones of the inputs. It is a third call through the
+    target, and a target that writes to its inputs would otherwise apply that
+    mutation to the very tensors the alias oracle is about to read.
+
+    It never asks for ``fullgraph``, whatever the run did. Under
+    ``fullgraph=True`` a graph break is a hard error, so the lane raises and
+    records no graphs at all; tracing again without it is what turns "inductor
+    raised" into "inductor raised, and here is the line it broke on". That is
+    the whole diagnosis under ``--fullgraph``, so it runs for a lane that raised
+    too, not only for one that answered.
+
+    It is not run for the lanes that are not compiled. ``eager`` and
+    ``eager_fp64`` go straight to the callable, so they have no graphs, and a
+    zero-break record for them would read as a compiled lane that traced
+    cleanly.
+
+    Returns:
+        The record, or ``None`` for an uncompiled lane.
+    """
+    if backend in EAGER_BACKENDS:
+        return None
+
+    dynamo = importlib.import_module("torch._dynamo")
+    _seed_everything(torch, seed)
+    args, call_kwargs = _clone_inputs(torch, tuple(example_inputs), dict(kwargs), device)
+    _reset_compiler(torch)
+    try:
+        explained = dynamo.explain(fn)(*args, **call_kwargs)
+    except Exception as exc:
+        log.debug("the explain pass for backend %s raised %s", backend, type(exc).__name__)
+        return GraphHealth(
+            unique_graphs_before=unique_graphs[0],
+            unique_graphs_after=unique_graphs[1],
+            explain_error=_capture(exc),
+        )
+
+    breaks = tuple(_break(reason) for reason in getattr(explained, "break_reasons", []) or [])
+    return GraphHealth(
+        graph_count=int(getattr(explained, "graph_count", 0) or 0),
+        # torch computes the count as graph_count - 1, which is right in the
+        # middle and wrong at both ends: a callable it captured no graph for
+        # reports -1, and a break whose resumption produced no second graph
+        # reports one fewer break than it recorded a reason for (measured: the
+        # data-dependent branch in cases/distributions_binomial_kl.py comes back
+        # graph_count 1, graph_break_count 0, one break reason). Floored at zero
+        # and at the reasons, so the count is never less than what was seen.
+        break_count=max(0, int(getattr(explained, "graph_break_count", 0) or 0), len(breaks)),
+        breaks=breaks,
+        op_count=int(getattr(explained, "op_count", 0) or 0),
+        compile_times=getattr(explained, "compile_times", None),
+        unique_graphs_before=unique_graphs[0],
+        unique_graphs_after=unique_graphs[1],
+    )
+
+
+def _break(reason: Any) -> GraphBreak:
+    """One ``GraphCompileReason`` as plain data.
+
+    Read through ``getattr`` rather than by attribute, because this is the one
+    torch object the runner takes apart that PLAN.md "Verified API surface" does
+    not pin field by field: a reason with no ``user_stack`` still has to produce
+    a record, since the reason text alone is most of the value.
+    """
+    text = str(getattr(reason, "reason", reason) or "")
+    stack = list(getattr(reason, "user_stack", None) or [])
+    return GraphBreak(reason=text, user_frame=_frame(stack[-1]) if stack else None)
+
+
+def _frame(frame: Any) -> str | None:
+    """``file:line in function`` for a traceback frame summary, or ``None``."""
+    filename = getattr(frame, "filename", None)
+    if filename is None:
+        return str(frame) or None
+    lineno = getattr(frame, "lineno", None)
+    name = getattr(frame, "name", None)
+    located = f"{filename}:{lineno}" if lineno is not None else str(filename)
+    return f"{located} in {name}" if name else located
 
 
 def _run_backward(torch: Any, fn: Any, result: BackendResult) -> None:
