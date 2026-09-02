@@ -35,6 +35,17 @@ only, so a change that passes locally on one version can still fail there.
 - mypy runs strict over `src/`, not over tests or cases.
 - Any finding on a real model is cross-checked against eager twice before it is
   called a bug.
+- Path discovery mutates the running interpreter on purpose: `discover.py`
+  inserts the target file's parent directory at `sys.path[0]` and registers the
+  module in `sys.modules` under the file's stem (or
+  `_compile_check_target_<stem>` when that name is already taken). Both exist so
+  a two-file repro imports its sibling. Keep them; if you change either, say so
+  in the README section that documents it, because it is behaviour a user can
+  observe.
+- Tests point `TORCHINDUCTOR_CACHE_DIR` at a directory `conftest.py` creates and
+  deletes. `TORCHINDUCTOR_FORCE_DISABLE_CACHES=1` stops inductor *reading* a
+  cached artifact, not *writing* generated code, so without this a test run
+  leaves hundreds of megabytes behind.
 
 ## Scope
 
