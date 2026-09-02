@@ -378,12 +378,15 @@ def run_backend(
 
     # PLAN.md "Runner semantics": each backend is called twice with the same
     # inputs; the second call exists so the graph oracle can see a recompile.
-    # Its output is deliberately discarded.
+    # Its output is deliberately discarded, but a failure is not: a lane that
+    # answers once and then raises is recorded on the result so the graph oracle
+    # and the report can say so.
     started = time.perf_counter()
     try:
         call(*args, **call_kwargs)
         result.second_call_s = time.perf_counter() - started
     except Exception as exc:
+        result.second_call_exception = _capture(exc)
         log.warning(
             "backend %s succeeded on the first call and raised %s on the second: %s",
             backend,

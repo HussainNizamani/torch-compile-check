@@ -107,6 +107,17 @@ class BackendResult:
     exception: CapturedException | None = None
     """Set when the backend raised; :attr:`outputs` is then empty."""
 
+    second_call_exception: CapturedException | None = None
+    """Set when the first call succeeded and the repeat call raised.
+
+    Its own field rather than a second value on :attr:`exception`, because the
+    two say different things. A backend that raises on the first call produced
+    no result at all; a backend that answers once and then throws produced a
+    result that is not reproducible, which is a graph-health fact the graph
+    oracle (M3) reads off a recompile that went wrong. Stage localization treats
+    only :attr:`exception` as "this lane did not run".
+    """
+
     input_grads: list[Any | None] = field(default_factory=list)
     """``.grad`` clone per input leaf, index-aligned with :attr:`inputs_before`.
 

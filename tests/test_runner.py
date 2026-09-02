@@ -22,6 +22,7 @@ from compile_check.runner import (
     RunnerError,
     available_backends,
     run_all,
+    run_backend,
     run_fp64_reference,
 )
 
@@ -139,6 +140,38 @@ def test_a_raising_target_is_captured_not_propagated():
         # The lane is still timed, so a report can say how long it took to fail.
         assert result.first_call_s is not None
         assert result.second_call_s is None
+        # The repeat call never happened, so there is nothing to record for it.
+        assert result.second_call_exception is None
+
+
+def test_a_failing_repeat_call_is_recorded_separately(caplog):
+    # PLAN.md "Runner semantics": each backend is called twice, and the second
+    # call is what shows a recompile. A lane that answers once and then raises
+    # produced a result that does not reproduce, which is not the same thing as
+    # a lane that never produced one.
+    class SecondCallRaises(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.calls = 0
+
+        def forward(self, x):
+            self.calls += 1
+            if self.calls > 1:
+                raise RuntimeError("this target answers exactly once")
+            return x * 2
+
+    with caplog.at_level(logging.WARNING, logger="compile_check"):
+        result = run_backend(SecondCallRaises(), (torch.ones(3),), "eager", grad=False)
+
+    assert result.ok
+    assert result.exception is None
+    torch.testing.assert_close(result.outputs[0], torch.full((3,), 2.0))
+    assert result.second_call_s is None
+    assert result.second_call_exception is not None
+    assert result.second_call_exception.type == "RuntimeError"
+    assert "answers exactly once" in result.second_call_exception.message
+    assert 0 < len(result.second_call_exception.traceback) <= TRACEBACK_LINES
+    assert "raised RuntimeError on the second" in caplog.text
 
 
 def test_inputs_are_isolated_between_backends():
