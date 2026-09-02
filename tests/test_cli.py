@@ -524,6 +524,66 @@ def test_a_backend_that_really_raised_exits_one_whatever_fail_on_says(capsys):
     assert "findings\n  none" in out
 
 
+def test_a_backend_the_target_registers_survives_a_cold_run(tmp_path):
+    # M2-2 housekeeping. The test above can only pass because importing the
+    # fixture in this process put the backend in the registry before the CLI
+    # looked; a user gets no such favour. In a fresh interpreter the name does
+    # not exist until discovery imports the target, and validating --backends
+    # before that rejected a backend that was about to exist -- as exit 2, a
+    # tool error, where the truth is a compiled lane that raised, exit 1.
+    from compile_check.discover import import_target_module
+
+    fixture = FIXTURES / "compile_only_raises.py"
+    backend = import_target_module(str(fixture)).BACKEND
+    env = dict(os.environ)
+    env["TORCHINDUCTOR_CACHE_DIR"] = str(tmp_path / "codegen")
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "compile_check.cli",
+            str(fixture),
+            "--backends",
+            f"eager,{backend}",
+            "--color",
+            "never",
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert completed.returncode == EXIT_FINDING, completed.stderr
+    assert "unknown backend" not in completed.stderr
+    assert "raised BackendCompilerFailed" in completed.stdout
+    assert f"first diverges at {backend}" in completed.stdout
+
+
+def test_a_backend_nothing_registers_is_still_a_tool_error(tmp_path):
+    # The other half: deferring the decision is not the same as dropping it.
+    env = dict(os.environ)
+    env["TORCHINDUCTOR_CACHE_DIR"] = str(tmp_path / "codegen")
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "compile_check.cli",
+            str(FIXTURES / "mlp.py"),
+            "--backends",
+            "eager,inducter",
+            "--color",
+            "never",
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert completed.returncode == EXIT_ERROR
+    assert "unknown backend 'inducter'" in completed.stderr
+    assert "Traceback" not in completed.stderr
+
+
 def test_the_main_path_reports_a_broken_model_as_the_model_and_exits_two(capsys):
     code = main([str(FIXTURES / "raises.py"), "--backends", "eager,aot_eager", "--color", "never"])
     captured = capsys.readouterr()

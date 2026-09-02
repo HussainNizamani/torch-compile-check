@@ -53,6 +53,11 @@ All notable changes to this project are documented here. The format follows
   into the next and read as a numerics divergence. `--share-module` turns the
   copy off for a model too large to duplicate, and the report's environment
   block says which mode produced it.
+- Backend names are validated after the target is imported, not before it: a
+  target that registers its own backend with `torch._dynamo.register_backend`
+  now works from a cold run, where it used to be rejected as a typo. The
+  up-front pass still catches an empty `--backends`, and an unknown name is
+  still exit 2 once nothing has registered it.
 - Tooling: ruff lint and format, mypy strict over `src/`, pytest, pre-commit, a
   `Makefile`, and a GitHub Actions matrix over Python 3.10 to 3.13 and torch
   stable and nightly on CPU.

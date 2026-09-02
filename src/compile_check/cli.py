@@ -420,6 +420,14 @@ def _guarded_run(args: argparse.Namespace) -> tuple[RunSet | None, list[str]]:
     ``xpu``; the choices in :func:`build_parser` and that function are the two
     places a device is admitted.
 
+    With one exception, added in M2-2: an unknown *backend* name is not decided
+    up front. A target module may register a backend of its own when it is
+    imported (``torch._dynamo.register_backend``), so a cold run that refused
+    the name before discovery refused a backend that was about to exist. The
+    up-front pass therefore defers unknown names -- it still catches an empty
+    ``--backends`` -- and :func:`compile_check.runner.run_all` validates for
+    real, after the import and before anything is compiled.
+
     Returns:
         The runset and the parsed ``--fail-on`` categories, or ``(None, [])``
         once a one-line tool error has been printed to stderr.
@@ -437,7 +445,7 @@ def _guarded_run(args: argparse.Namespace) -> tuple[RunSet | None, list[str]]:
         return None, []
 
     try:
-        validate_backends(backends)
+        validate_backends(backends, defer_unknown=True)
         validate_device(args.device)
         target = load_target(args.path, entry=args.entry, inputs=args.inputs)
         runset = run_all(
