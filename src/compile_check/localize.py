@@ -36,6 +36,7 @@ from compile_check.runner import ABLATION_LADDER, FP64_BACKEND
 
 __all__ = [
     "CLEAN",
+    "GRAPH_ORACLE",
     "MODEL",
     "NO_REFERENCE",
     "STAGES",
@@ -68,6 +69,12 @@ STAGES: dict[str, str] = {
     "aot_eager_decomp_partition": "decomposition/partitioner",
     "inductor": "inductor lowering/codegen",
 }
+
+# The one oracle whose fail findings do not move the ladder, spelled once. See
+# BackendSummary.diverged for why, and note that this is a name and not an
+# import: localize.py is read by report/terminal.py, which imports the oracle
+# registry, and importing it back here would close the loop.
+GRAPH_ORACLE = "graph"
 
 # PLAN.md "Where divergence appears is not always where the fix belongs".
 OBSERVABILITY_CAVEAT = (
@@ -110,6 +117,15 @@ class BackendSummary:
     info: int = 0
     """Context that is never a verdict (the fp64 reference distance)."""
 
+    graph_fail: int = 0
+    """How many of :attr:`fail` came from the graph oracle.
+
+    Counted separately because it is subtracted, not added: see
+    :attr:`diverged`. Kept as a count rather than a flag so a report can say how
+    many, and included in :attr:`fail` so that number still means "fail-severity
+    findings against this lane".
+    """
+
     raised: CapturedException | None = None
     """Set when the lane's first call raised, so it produced nothing to compare."""
 
@@ -118,9 +134,9 @@ class BackendSummary:
 
     Recorded and reported, deliberately not localized on. An answer that does
     not reproduce is graph health, which PLAN.md "Oracles" gives to the graph
-    oracle, informational unless ``--fail-on graph`` is set; that oracle lands
-    in M3. Letting it set the stage here would produce a correctness verdict out
-    of a check that has not been written yet.
+    oracle, informational unless ``--fail-on graph`` is set. It reaches the
+    report as a graph finding since M3-1, and it still does not set the stage
+    here, for the reason :attr:`diverged` gives.
     """
 
     @property
@@ -132,8 +148,17 @@ class BackendSummary:
         count -- a contiguous-to-contiguous stride change is the metadata
         oracle's example of a difference that is not a defect -- and neither
         does an ``info``.
+
+        The graph oracle is the exception, added in M3-1. PLAN.md "Stage
+        localization" walks the ablation ladder to place a *divergence*: a lane
+        whose answers differ from eager's. A graph break is not that. It is the
+        same answer reached with a slower plan, and letting it name a stage
+        would report "first diverges at inductor, which implicates inductor
+        lowering/codegen" for a model that returned exactly the right numbers.
+        Its findings are counted in :attr:`fail`, they still decide the exit
+        code through ``--fail-on graph``, and they are subtracted here.
         """
-        return self.raised is not None or self.fail > 0
+        return self.raised is not None or (self.fail - self.graph_fail) > 0
 
 
 @dataclass(frozen=True)
@@ -256,7 +281,7 @@ def _summarize(runset: RunSet, findings: Sequence[Finding]) -> tuple[BackendSumm
     reachable through its own exception, which rule 2 has already handled.
     """
     counts: dict[str, dict[str, int]] = {
-        name: {"fail": 0, "warn": 0, "info": 0} for name in runset.results
+        name: {"fail": 0, "warn": 0, "info": 0, "graph_fail": 0} for name in runset.results
     }
     for finding in findings:
         bucket = counts.get(finding.backend)
@@ -271,6 +296,8 @@ def _summarize(runset: RunSet, findings: Sequence[Finding]) -> tuple[BackendSumm
             )
             continue
         bucket[finding.severity] += 1
+        if finding.severity == "fail" and finding.oracle == GRAPH_ORACLE:
+            bucket["graph_fail"] += 1
 
     return tuple(
         BackendSummary(
@@ -278,6 +305,7 @@ def _summarize(runset: RunSet, findings: Sequence[Finding]) -> tuple[BackendSumm
             fail=counts[name]["fail"],
             warn=counts[name]["warn"],
             info=counts[name]["info"],
+            graph_fail=counts[name]["graph_fail"],
             raised=runset.results[name].exception,
             raised_on_repeat=runset.results[name].second_call_exception,
         )

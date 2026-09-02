@@ -18,7 +18,7 @@ from compile_check import __version__
 from compile_check.localize import localize
 from compile_check.oracles import Finding
 from compile_check.report.terminal import DEFAULT_MAX_FINDINGS, render
-from compile_check.results import BackendResult, CapturedException, RunSet
+from compile_check.results import BackendResult, CapturedException, GraphBreak, GraphHealth, RunSet
 
 ANSI = re.compile(r"\033\[[0-9;]*m")
 
@@ -61,7 +61,19 @@ def runset() -> RunSet:
     )
     for name, first, second in LANES:
         built.results[name] = BackendResult(
-            backend=name, outputs=[1], first_call_s=first, second_call_s=second
+            backend=name,
+            outputs=[1],
+            first_call_s=first,
+            second_call_s=second,
+            # One graph, no breaks, and a counter that did not move: what a
+            # compiled lane looks like when nothing is wrong. `None` for eager,
+            # which is never compiled and so never has graphs -- and which the
+            # checks table does not have a column for anyway.
+            graph_health=None
+            if name == "eager"
+            else GraphHealth(
+                graph_count=1, op_count=3, unique_graphs_before=1, unique_graphs_after=1
+            ),
         )
     return built
 
@@ -135,9 +147,9 @@ checks
   alias     yes      pass              pass
   metadata  yes      pass              pass
   grad      yes      pass              pass
-  graph     no       not yet           not yet
+  graph     no       pass              pass
 
-  pass = no finding   not yet = the oracle lands in M3
+  pass = no finding
 
 findings
   none
@@ -175,9 +187,9 @@ checks
   alias     no       pass              pass
   metadata  yes      pass              1 fail 1 warn
   grad      no       pass              pass
-  graph     no       not yet           not yet
+  graph     no       pass              pass
 
-  pass = no finding   not yet = the oracle lands in M3
+  pass = no finding
 
 findings
   numerics  (1 fail)
@@ -337,6 +349,86 @@ def test_allowed_caches_are_shouted_about(runset):
     report = render(runset, [], localize(runset, []))
 
     assert "ENABLED (force_disable_caches=False, --allow-caches)" in report
+
+
+def test_the_module_row_says_what_actually_happened_to_the_module(runset):
+    # The M3 brief's carry-over from the M2-2 review: a module the runner could
+    # not deep copy left every lane sharing one object while this row still said
+    # "deep copied per lane". A run whose lanes may have leaked state into each
+    # other has to say so where the evidence is read.
+    assert "module    deep copied per lane" in render(runset, [], localize(runset, []))
+
+    runset.module_copy_error = "TypeError: cannot pickle 'module' object"
+    report = render(runset, [], localize(runset, []))
+    assert (
+        "module    shared across every lane (deep copy failed: TypeError: cannot pickle "
+        "'module' object)" in report
+    )
+
+    runset.share_module = True
+    assert "module    shared across every lane (--share-module)" in render(
+        runset, [], localize(runset, [])
+    )
+
+
+def test_a_plain_callable_is_not_claimed_to_have_been_copied(runset):
+    runset.target_is_module = False
+    report = render(runset, [], localize(runset, []))
+
+    assert "module    not copied: the target is a plain callable" in report
+
+
+def test_the_graph_row_is_a_real_check_and_not_a_placeholder(runset):
+    report = render(runset, [], localize(runset, []), fail_on=["graph"])
+
+    assert "graph     yes      pass              pass" in report
+    assert "not yet" not in report
+
+
+def test_a_lane_with_no_graph_health_gets_a_dash_and_says_why(runset):
+    runset.results["inductor"].graph_health = None
+    report = render(runset, [], localize(runset, []))
+
+    assert "graph     no       pass              -" in report
+    assert "-    = no graph health was recorded for that lane" in report
+
+
+def test_a_graph_fail_is_reported_without_naming_a_compilation_stage(runset):
+    # A graph break is the same answer reached with a slower plan, so the
+    # ablation ladder has nothing to place. The stage block says that out loud
+    # rather than leaving a "clean" verdict beside a red row unexplained.
+    runset.results["inductor"].graph_health = GraphHealth(
+        graph_count=2,
+        break_count=1,
+        breaks=(GraphBreak(reason="Data-dependent branching", user_frame="m.py:7 in forward"),),
+    )
+    finding = Finding(
+        oracle="graph",
+        backend="inductor",
+        output_index=None,
+        severity="fail",
+        message="inductor broke the graph at m.py:7 in forward: Data-dependent branching",
+        details={"field": "break_reasons"},
+    )
+    verdict = localize(runset, [finding])
+    report = render(runset, [finding], verdict, fail_on=["graph"])
+
+    assert "graph     yes      pass              1 fail" in report
+    assert "clean: no backend diverged from eager across 2 lanes" in report
+    # Wrapped prose, so compared with the line breaks collapsed.
+    flat = " ".join(report.split())
+    assert "inductor has 1 fail-severity graph finding." in flat
+    assert "--fail-on graph is what turns it into exit code 1." in flat
+
+
+def test_the_baseline_row_appears_only_when_there_is_a_baseline(runset):
+    assert "baseline" not in render(runset, [], localize(runset, []))
+
+    report = render(runset, [], localize(runset, []), baseline=".compile-check/baseline.json")
+    assert (
+        "baseline  .compile-check/baseline.json   (the graph oracle reports new breaks only)"
+        in report
+    )
 
 
 def test_a_negative_cap_never_reports_more_hidden_than_exist(runset, findings):

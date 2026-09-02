@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import os
 import re
 import subprocess
@@ -78,7 +79,7 @@ def test_probe_exits_zero_and_prints_one_row_per_api(capsys):
         assert line.split()[-1] in {"present", "absent"}
 
 
-@pytest.mark.parametrize("flag", ["--json", "--md"])
+@pytest.mark.parametrize("flag", ["--json", "--md", "--write-baseline"])
 def test_probe_warns_that_report_flags_are_ignored(capsys, flag):
     assert main(["--probe", flag, "out"]) == EXIT_OK
     captured = capsys.readouterr()
@@ -147,6 +148,8 @@ def test_full_v1_flag_surface_parses():
             "600",
             "--baseline",
             "graph-baseline.json",
+            "--write-baseline",
+            "new-baseline.json",
             "--no-grad",
             "--share-module",
             "--max-findings",
@@ -173,6 +176,7 @@ def test_full_v1_flag_surface_parses():
     assert args.fp64_oracle is True
     assert args.budget == pytest.approx(600.0)
     assert args.baseline == "graph-baseline.json"
+    assert args.write_baseline == "new-baseline.json"
     assert args.no_grad is True
     assert args.share_module is True
     assert args.max_findings == 3
@@ -189,6 +193,8 @@ def test_defaults_match_the_plan():
     assert args.dynamic is False
     assert args.no_grad is False
     assert args.share_module is False
+    assert args.baseline is None
+    assert args.write_baseline is None
     assert args.grad_tol_factor == pytest.approx(DEFAULT_GRAD_TOL_FACTOR)
     assert args.max_findings == DEFAULT_MAX_FINDINGS
     assert args.color == "auto"
@@ -208,17 +214,15 @@ def test_every_module_imports():
 def test_stubs_raise_not_implemented():
     # discover.py and runner.py landed in M1-1, the numerics and metadata
     # oracles in M1-2, localize.py plus report/terminal.py in M1-3, the alias
-    # oracle in M2-1 and the grad oracle in M2-2; each is covered by its own
-    # test module. What is left below is what M3 still owes.
+    # oracle in M2-1, the grad oracle in M2-2 and the graph oracle in M3-1; each
+    # is covered by its own test module. What is left below is what M3 still
+    # owes: the minimizer and the three report formats.
     from compile_check import minimize
-    from compile_check.oracles import graph
     from compile_check.report import json as json_report
     from compile_check.report import markdown, pytest_case
 
     with pytest.raises(NotImplementedError):
         minimize.minimize(None, None, lambda _fn, _inputs: True)
-    with pytest.raises(NotImplementedError):
-        graph.check({}, {})
     with pytest.raises(NotImplementedError):
         json_report.dump({}, Path("out.json"))
     with pytest.raises(NotImplementedError):
@@ -273,10 +277,11 @@ def test_run_only_reports_the_oracles_and_finds_nothing_on_a_clean_model(capsys)
     code = main([str(FIXTURES / "mlp.py"), "--run-only", "--backends", "eager,aot_eager"])
     out = capsys.readouterr().out
     assert code == EXIT_OK
-    # The four that run, and the one that does not exist yet: "not checked"
-    # must not read as "checked and clean".
-    assert "oracles    numerics, alias, metadata, grad" in out
-    assert "not implemented yet, nothing checked: graph" in out
+    # All five since M3-1, and the "not checked" clause is gone with the last
+    # stub: the line exists so an unwritten oracle cannot read as a clean one,
+    # and there is no longer one to name.
+    assert "oracles    numerics, alias, metadata, grad, graph" in out
+    assert "not implemented yet" not in out
     assert "findings\n  none" in out
 
 
@@ -812,6 +817,113 @@ def test_the_main_path_says_which_flags_it_ignored(capsys, tmp_path):
     assert "--json is not implemented yet (it lands in M3), ignored" in err
     assert "--md is not implemented yet (it lands in M3), ignored" in err
     assert not (tmp_path / "out.json").exists()
+    # --baseline is no longer among them: it landed with the graph oracle.
+    assert "--baseline is not implemented yet" not in err
+
+
+# --- the graph baseline, end to end ----------------------------------------
+
+
+def test_a_written_baseline_reads_back_and_silences_the_run_it_came_from(capsys, tmp_path):
+    # The M3-1 brief's round trip, on the reference fixture: --write-baseline
+    # then --baseline, with the second run reporting nothing new.
+    path = tmp_path / "baseline.json"
+    argv = [str(FIXTURES / "mlp.py"), "--backends", "eager,inductor", "--color", "never"]
+
+    assert main([*argv, "--write-baseline", str(path)]) == EXIT_OK
+    err = capsys.readouterr().err
+    assert f"wrote the graph baseline {path} (inductor)" in err
+    assert json.loads(path.read_text()) == {
+        "inductor": {"graph_break_count": 0, "break_reasons": []}
+    }
+
+    assert main([*argv, "--baseline", str(path), "--fail-on", "graph"]) == EXIT_OK
+    out = capsys.readouterr().out
+    assert "baseline  " in out
+    assert "graph     yes      pass" in out
+    assert "findings\n  none" in out
+
+
+def test_a_baseline_that_does_not_list_a_break_fails_the_run_naming_it(capsys, tmp_path):
+    path = tmp_path / "baseline.json"
+    path.write_text('{"inductor": {"graph_break_count": 0, "break_reasons": []}}')
+    code = main(
+        [
+            str(FIXTURES / "graph_break.py"),
+            "--backends",
+            "eager,inductor",
+            "--baseline",
+            str(path),
+            "--fail-on",
+            "graph",
+            "--color",
+            "never",
+        ]
+    )
+    out = capsys.readouterr().out
+
+    assert code == EXIT_FINDING
+    assert "Failed to trace builtin operator" in out
+    assert f"this break is not in {path}" in " ".join(out.split())
+    # PLAN.md "Stage localization": a graph break is not a divergence to place.
+    assert "clean: no backend diverged" in out
+
+
+def test_a_break_with_no_baseline_is_informational_and_the_run_stays_clean(capsys):
+    code = main(
+        [
+            str(FIXTURES / "graph_break.py"),
+            "--backends",
+            "eager,inductor",
+            "--fail-on",
+            "graph",
+            "--color",
+            "never",
+        ]
+    )
+    out = capsys.readouterr().out
+
+    assert code == EXIT_OK
+    assert "graph     yes      2 info" in out
+
+
+def test_a_missing_baseline_is_a_tool_error_before_anything_compiles(capsys, tmp_path):
+    code = main([str(FIXTURES / "mlp.py"), "--baseline", str(tmp_path / "absent.json")])
+    captured = capsys.readouterr()
+
+    assert code == EXIT_ERROR
+    assert "cannot read the graph baseline" in captured.err
+    assert "write one first with --write-baseline" in captured.err
+    # Nothing ran: a bad flag is reported before a possibly slow import.
+    assert captured.out == ""
+
+
+def test_a_malformed_baseline_is_a_tool_error(capsys, tmp_path):
+    path = tmp_path / "baseline.json"
+    path.write_text("{not json")
+    code = main([str(FIXTURES / "mlp.py"), "--baseline", str(path)])
+
+    assert code == EXIT_ERROR
+    assert "is not valid JSON" in capsys.readouterr().err
+
+
+def test_a_baseline_that_cannot_be_written_is_a_tool_error(capsys, tmp_path):
+    blocked = tmp_path / "not-a-directory"
+    blocked.write_text("")
+    code = main(
+        [
+            str(FIXTURES / "mlp.py"),
+            "--backends",
+            "eager",
+            "--write-baseline",
+            str(blocked / "baseline.json"),
+            "--color",
+            "never",
+        ]
+    )
+
+    assert code == EXIT_ERROR
+    assert "cannot write the graph baseline" in capsys.readouterr().err
 
 
 def test_no_grad_switches_the_backward_pass_off(capsys):

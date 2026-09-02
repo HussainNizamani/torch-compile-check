@@ -177,6 +177,34 @@ def test_a_failing_repeat_call_is_reported_but_does_not_set_the_stage():
     assert counts["inductor"].diverged is False
 
 
+def test_a_graph_fail_is_counted_but_never_names_a_compilation_stage():
+    # M3-1: the ladder places a divergence, and a graph break is not one. It is
+    # the same answer reached with a slower plan, so a stage verdict built from
+    # it would read "first diverges at aot_eager" for a model whose numbers are
+    # exactly right.
+    runset = make_runset("eager", "aot_eager", "inductor")
+    verdict = localize(runset, [finding("aot_eager", "fail", oracle="graph")])
+
+    assert verdict.stage == CLEAN
+    assert verdict.first_divergent_backend is None
+    counts = {entry.backend: entry for entry in verdict.backends}
+    assert counts["aot_eager"].fail == 1
+    assert counts["aot_eager"].graph_fail == 1
+    assert counts["aot_eager"].diverged is False
+
+
+def test_a_correctness_fail_beside_a_graph_fail_still_sets_the_stage():
+    runset = make_runset("eager", "aot_eager", "inductor")
+    verdict = localize(
+        runset,
+        [finding("inductor", "fail", oracle="graph"), finding("inductor", "fail")],
+    )
+
+    assert verdict.first_divergent_backend == "inductor"
+    counts = {entry.backend: entry for entry in verdict.backends}
+    assert (counts["inductor"].fail, counts["inductor"].graph_fail) == (2, 1)
+
+
 # --- ordering and counts ---------------------------------------------------
 
 
