@@ -509,6 +509,11 @@ def _nothing_to_emit(findings: Sequence[Finding], verdict: StageVerdict) -> str:
     """Why no regression test was written, in the words the user needs."""
     from compile_check.report.pytest_case import select
 
+    if verdict.eager_exception is not None:
+        # The reference itself raised (PLAN.md's MODEL stage): whatever a
+        # compiled lane did, there is no working eager behaviour to write an
+        # eager-versus-compiled assertion against.
+        return "the eager reference itself raised, so there is no eager behaviour to assert"
     raised = any(entry.raised is not None for entry in verdict.backends if entry.backend != "eager")
     if select(findings) is None and not raised:
         return (
