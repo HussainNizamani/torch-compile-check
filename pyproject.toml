@@ -97,7 +97,12 @@ select = [
 "validation/*.py" = ["T20"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["compile_check"]
+# `cases` is not installed and not importable from anywhere but the repository
+# root, which is exactly why it has to be named here: without it isort files
+# `from cases.markers import ...` as a third-party package and sorts the corpus
+# imports away from the ones beside them. tests/conftest.py is what puts the
+# root on sys.path.
+known-first-party = ["cases", "compile_check"]
 
 [tool.mypy]
 # PLAN.md "Engineering decisions": mypy strict over the package, not over tests
