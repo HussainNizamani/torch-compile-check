@@ -450,6 +450,13 @@ def run_backend(
     result.output_spec = out_spec
     result.output_refs = list(out_leaves)
     result.outputs = [_snapshot(torch, leaf) for leaf in out_leaves]
+    # Read off the live leaves and before the backward pass, because neither the
+    # clone above nor the leaf afterwards can answer: a detached clone always
+    # says False, and the flag is what decides which outputs the backward pass
+    # reduces. Recorded whether or not grad is on, since it is an output fact.
+    result.output_requires_grad = [
+        isinstance(leaf, torch.Tensor) and bool(leaf.requires_grad) for leaf in out_leaves
+    ]
     # Taken after the measured call and before the repeat call, so an input
     # mutation is recorded once rather than twice (M2's mutation oracle).
     _record_inputs_after(torch, result, leaves)
@@ -484,11 +491,17 @@ def _run_backward(torch: Any, fn: Any, result: BackendResult) -> None:
     every floating point output element, in traversal order, integer and bool
     outputs skipped), call backward, then compare both the values and the set of
     tensors that received a grad at all.
+
+    The sum is taken at float64. Both lanes reduce with the same rule, so the
+    width does not decide the comparison, but a float32 sum over a large output
+    loses low bits to the accumulation order the two lanes happen to pick, and
+    that difference would then reach every gradient downstream of it. Widening
+    the reduction keeps the harness out of the numbers the grad oracle compares.
     """
     if not _anything_requires_grad(torch, fn, result.input_refs):
         return
     reduced = [
-        leaf.float().sum()
+        leaf.double().sum()
         for leaf in result.output_refs
         if isinstance(leaf, torch.Tensor) and leaf.is_floating_point() and leaf.requires_grad
     ]

@@ -360,6 +360,23 @@ def test_a_requires_grad_difference_is_a_fail():
     assert findings[0].details == {"field": "requires_grad", "expected": False, "got": True}
 
 
+def test_the_requires_grad_of_a_real_run_is_read_from_the_runners_record():
+    # The field was vacuous on every real run before M2-2: what the oracle
+    # compares are the runner's output clones, and a clone is detached, so both
+    # sides always answered False. The finding below can only come from the
+    # record, because neither clone in it says anything but False.
+    target = load_target(str(FIXTURES / "mlp.py"))
+    eager = run_all(target, ["eager"], seed=0).results["eager"]
+    detached = lane("inductor", eager.outputs, output_requires_grad=[False])
+
+    assert [tensor.requires_grad for tensor in eager.outputs] == [False]
+    assert METADATA.compare(eager, eager, CFG) == []
+
+    findings = METADATA.compare(eager, detached, CFG)
+    assert [finding.details["field"] for finding in findings] == ["requires_grad"]
+    assert findings[0].details == {"field": "requires_grad", "expected": True, "got": False}
+
+
 def test_a_device_difference_is_a_fail():
     # The meta device stands in for a cuda/cpu divergence on a CPU-only box:
     # what is compared is the device type, not the index.

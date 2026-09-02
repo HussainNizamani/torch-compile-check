@@ -58,6 +58,14 @@ All notable changes to this project are documented here. The format follows
   now works from a cold run, where it used to be rejected as a typo. The
   up-front pass still catches an empty `--backends`, and an unknown name is
   still exit 2 once nothing has registered it.
+- `BackendResult.output_requires_grad`, `BackendResult.grads`, and
+  `BackendResult.grad_present`: which outputs carried a gradient, and which
+  inputs and parameters received one, labelled once so a message and a set
+  comparison cannot drift apart. The backward pass reduces at float64, so the
+  accumulation order of a float32 sum cannot reach the gradients being compared.
+- The metadata oracle's `requires_grad` comparison reads the runner's record
+  rather than the output clone. The clone is detached, so the field answered
+  `False` on both sides of every real run and the check was vacuous.
 - Tooling: ruff lint and format, mypy strict over `src/`, pytest, pre-commit, a
   `Makefile`, and a GitHub Actions matrix over Python 3.10 to 3.13 and torch
   stable and nightly on CPU.
