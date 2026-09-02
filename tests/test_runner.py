@@ -14,7 +14,13 @@ import torch
 
 from compile_check.discover import Target, load_target
 from compile_check.results import TRACEBACK_LINES, BackendResult, RunSet
-from compile_check.runner import CACHE_ENV_VAR, run_all
+from compile_check.runner import (
+    ABLATION_LADDER,
+    CACHE_ENV_VAR,
+    RunnerError,
+    available_backends,
+    run_all,
+)
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
@@ -202,3 +208,47 @@ def test_seeding_is_reapplied_per_backend():
         runset.results["eager"].outputs[0],
         runset.results["aot_eager"].outputs[0],
     )
+
+
+def test_the_compiler_is_reset_once_per_backend(monkeypatch):
+    # PLAN.md "Runner semantics": each backend runs after a reset, so no
+    # compiled artifact or guard from a previous backend is reused.
+    calls = []
+    real_reset = torch.compiler.reset
+
+    def counting_reset():
+        calls.append(len(calls))
+        real_reset()
+
+    monkeypatch.setattr(torch.compiler, "reset", counting_reset)
+    target = Target(fn=torch.sin, example_inputs=(torch.ones(3),), name="inline:sin")
+    run_all(target, ["eager", "aot_eager"])
+
+    assert len(calls) == 2
+
+
+def test_unknown_backends_are_rejected_before_anything_runs():
+    target = Target(fn=torch.sin, example_inputs=(torch.ones(3),), name="inline:sin")
+    with pytest.raises(RunnerError) as excinfo:
+        run_all(target, ["eager", "bogus"])
+    message = str(excinfo.value)
+    assert "'bogus'" in message
+    assert "eager, aot_eager, aot_eager_decomp_partition, inductor" in message
+
+
+def test_available_backends_covers_the_ablation_ladder():
+    available = available_backends()
+    assert set(ABLATION_LADDER) <= set(available)
+    # PLAN.md: eager and aot_eager carry the debug tag, so a validator that
+    # forgot exclude_tags=() would miss them.
+    assert "eager" in available
+    assert "aot_eager" in available
+
+
+def test_an_unavailable_device_is_rejected_before_anything_runs():
+    if torch.cuda.is_available():  # pragma: no cover - depends on the machine
+        pytest.skip("this machine has CUDA, so the unavailable path cannot run")
+    target = Target(fn=torch.sin, example_inputs=(torch.ones(3),), name="inline:sin")
+    with pytest.raises(RunnerError) as excinfo:
+        run_all(target, ["eager"], device="cuda")
+    assert "no CUDA device" in str(excinfo.value)

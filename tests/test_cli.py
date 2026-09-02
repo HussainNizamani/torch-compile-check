@@ -259,3 +259,74 @@ def test_run_only_reports_a_discovery_failure_on_stderr(capsys):
 def test_run_only_without_a_target_is_a_tool_error(capsys):
     assert main(["--run-only"]) == EXIT_ERROR
     assert "needs a target" in capsys.readouterr().err
+
+
+def test_run_only_rejects_an_unknown_backend(capsys):
+    code = main([str(FIXTURES / "mlp.py"), "--run-only", "--backends", "eager,bogus"])
+    err = capsys.readouterr().err
+    assert code == EXIT_ERROR
+    assert "Traceback" not in err
+    assert len(err.strip().splitlines()) == 1
+    assert "'bogus'" in err
+    assert "unknown backend" in err
+
+
+def test_run_only_rejects_an_empty_backend_list(capsys):
+    code = main([str(FIXTURES / "mlp.py"), "--run-only", "--backends", ","])
+    err = capsys.readouterr().err
+    assert code == EXIT_ERROR
+    assert "Traceback" not in err
+    assert "no backends requested" in err
+
+
+def test_run_only_rejects_cuda_when_torch_reports_none(capsys):
+    import torch
+
+    if torch.cuda.is_available():  # pragma: no cover - depends on the machine
+        pytest.skip("this machine has CUDA, so the unavailable path cannot run")
+    code = main([str(FIXTURES / "mlp.py"), "--run-only", "--device", "cuda"])
+    err = capsys.readouterr().err
+    assert code == EXIT_ERROR
+    assert "Traceback" not in err
+    assert len(err.strip().splitlines()) == 1
+    assert "cuda" in err
+    assert "no CUDA device" in err
+
+
+def test_run_only_turns_an_unexpected_error_into_a_tool_error(capsys, monkeypatch):
+    from compile_check import runner as runner_module
+
+    def boom(*args, **kwargs):
+        raise ValueError("something the tool did not expect")
+
+    monkeypatch.setattr(runner_module, "run_all", boom)
+    code = main([str(FIXTURES / "mlp.py"), "--run-only", "--backends", "eager"])
+    err = capsys.readouterr().err
+    assert code == EXIT_ERROR
+    assert "Traceback" not in err
+    assert "ValueError: something the tool did not expect" in err
+
+
+def test_a_multi_line_error_is_reported_on_one_line(capsys, monkeypatch):
+    from compile_check import runner as runner_module
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("first line\nsecond line\nthird line")
+
+    monkeypatch.setattr(runner_module, "run_all", boom)
+    assert main([str(FIXTURES / "mlp.py"), "--run-only"]) == EXIT_ERROR
+    err = capsys.readouterr().err
+    assert len(err.strip().splitlines()) == 1
+    assert "first line" in err
+    assert "second line" not in err
+    assert "+2 more lines" in err
+
+
+def test_a_model_that_raises_still_reports_per_backend(capsys):
+    # The boundary must not swallow this one: eager failing is a result the
+    # report shows, and only then exit 2.
+    code = main([str(FIXTURES / "raises.py"), "--run-only", "--backends", "eager"])
+    captured = capsys.readouterr()
+    assert code == EXIT_ERROR
+    assert "raised RuntimeError" in captured.out
+    assert captured.err == ""
