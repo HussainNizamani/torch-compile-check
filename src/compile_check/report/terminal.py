@@ -114,8 +114,12 @@ _DETAIL_ORDER: tuple[str, ...] = (
 )
 
 # Already said in the finding's own message; repeating it would double the
-# report's length for no information.
-_DETAIL_SKIP: frozenset[str] = frozenset({"assert_close", "error"})
+# report's length for no information. ``left`` and ``right`` are the alias
+# oracle's two entity labels, which its message names in prose ("inductor
+# returned input[0] itself as output[0]"); they are on the finding so that the
+# JSON artifact and the test emitter of M3-2 can read the pair without parsing
+# an English sentence, and printing them here would only say it twice.
+_DETAIL_SKIP: frozenset[str] = frozenset({"assert_close", "error", "left", "right"})
 
 
 def render(
@@ -234,8 +238,10 @@ def _environment(
         # Its own row, and printed for both modes rather than only for the
         # non-default one: a lane that shares the module can diverge by itself,
         # because a buffer the forward pass writes leaks into the next lane, so
-        # a report that did not say which mode produced it is not evidence.
-        ("module", _module_line(runset)),
+        # a report that did not say which mode produced it is not evidence. The
+        # sentence lives on the runset since M3-2, so this block and the JSON
+        # environment block cannot come to say different things.
+        ("module", runset.module_handling),
         # The tolerance the gradients were compared under, always printed and
         # not only when it is non-default: a clean grad row at 10x says
         # something weaker than a clean grad row at 1x, and a reader cannot tell
@@ -249,28 +255,6 @@ def _environment(
         # changes what a clean graph row means.
         rows.append(("baseline", f"{baseline}   (the graph oracle reports new breaks only)"))
     return _section("environment", [f"{name:<10}{value}" for name, value in rows], paint)
-
-
-def _module_line(runset: RunSet) -> str:
-    """What actually happened to the module, not what the flags asked for.
-
-    Three states, and the M3 brief's point is that the third one used to be
-    invisible. ``--share-module`` is a choice; a module that refused
-    ``copy.deepcopy`` gets the same sharing without having chosen it, and until
-    M3-1 that showed here as "deep copied per lane" with the reason only in a
-    warning log. A run whose lanes may have leaked state into each other has to
-    say so where the evidence is read.
-
-    A target that is not an ``nn.Module`` gets neither sentence: a function has
-    no parameters or buffers, so there was never a copy to make or to skip.
-    """
-    if not runset.target_is_module:
-        return "not copied: the target is a plain callable, with no state to isolate"
-    if runset.share_module:
-        return "shared across every lane (--share-module)"
-    if runset.module_copy_error is not None:
-        return f"shared across every lane (deep copy failed: {runset.module_copy_error})"
-    return "deep copied per lane"
 
 
 def _grad_line(grad: bool, factor: float) -> str:
@@ -548,9 +532,10 @@ def _next_steps(paint: Paint) -> str:
     return _section(
         "next",
         [
-            paint(
-                "run with --json to save the result, --md for an issue draft (both land in M3)",
-                "dim",
+            paint(line, "dim")
+            for line in _wrap(
+                "run with --json to save the result, --md for an issue draft, and "
+                "--emit-test for a regression test (the minimizer lands in M3-3)"
             )
         ],
         paint,
