@@ -7,17 +7,26 @@ repos:
       - id: end-of-file-fixer
       - id: trailing-whitespace
 
+  # Pinned to the ruff version the dev extra installs, so the hook and
+  # `make lint` cannot disagree about formatting.
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.12.7
+    rev: v0.16.5
     hooks:
-      - id: ruff
+      - id: ruff-check
         args: [--fix]
       - id: ruff-format
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.17.1
+  # mypy runs from the project environment rather than from an isolated hook
+  # environment: it has to see torch's type information, and the mirrored hook
+  # would install a second multi-gigabyte copy of torch per contributor.
+  # `pip install -e ".[dev]"` is the documented setup step, so mypy is there.
+  - repo: local
     hooks:
       - id: mypy
+        name: mypy (strict, src/)
+        entry: mypy
+        language: system
+        types: [python]
         files: ^src/
-        args: [--strict]
-        additional_dependencies: [torch>=2.4]
+        pass_filenames: false
+        args: [src/]
