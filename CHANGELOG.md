@@ -69,12 +69,29 @@ All notable changes to this project are documented here. The format follows
 - The gradients oracle: one backward per lane on the deterministic scalar
   reduction, then two comparisons. The set of tensors that received a gradient
   must be identical, and a finding names the parameter; the gradients themselves
-  go through the numerics rule, so `--rtol` and `--atol` reach them unchanged. A
+  go through the numerics rule, so `--rtol` and `--atol` reach them. A
   backward that raised in one lane and not the other is a fail on its own, and
   `--no-grad` reports an `info` line rather than a clean grad row. Registered in
   `ORACLES`, so `--fail-on grad` now decides an exit code.
 - `numerics.compare_tensors`: the value comparison as one reusable call, so a
   gradient and an output are compared by the same code and the same tolerances.
+- `--seed` is applied before the target module is imported, and again before
+  every backend. A target that builds its model at module scope -- the shape
+  `model = torchvision.models.resnet18(weights=None)` has -- draws its weights
+  during discovery, so a seed applied afterwards never reached them and two runs
+  of the same command compared two different models.
+- `--grad-tol-factor` (default 10): what the grad oracle multiplies the numerics
+  tolerances by. A gradient is a sum over every path that reaches a tensor and
+  compilation is free to reassociate that sum, which is why the M2-2
+  verification saw a compiled resnet18 gradient about 1.24e-5 from eager's
+  against a float32 atol of 1e-5 and the same run flip between clean and
+  failing. The tolerances for outputs are unchanged, and the report's
+  environment block records the factor the gradients were compared under. Ten
+  clears the measured borderline case and not every model: a whole resnet18
+  backward at 2x3x64x64 needs about 161x on torch 2.14.0+cpu/aarch64, and a
+  float64 reference puts eager and inductor at the same order of error (3.4e-5
+  against 3.9e-5), so that is the float32 noise floor rather than a miscompile.
+  PLAN.md "Tolerance policy" is what this measurement feeds.
 - Tooling: ruff lint and format, mypy strict over `src/`, pytest, pre-commit, a
   `Makefile`, and a GitHub Actions matrix over Python 3.10 to 3.13 and torch
   stable and nightly on CPU.

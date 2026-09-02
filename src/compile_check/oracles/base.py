@@ -24,6 +24,7 @@ from typing import Any, Literal, Protocol, runtime_checkable
 from compile_check.results import BackendResult
 
 __all__ = [
+    "DEFAULT_GRAD_TOL_FACTOR",
     "SEVERITIES",
     "Finding",
     "Oracle",
@@ -33,6 +34,40 @@ __all__ = [
 ]
 
 log = logging.getLogger("compile_check")
+
+# What the grad oracle multiplies the numerics tolerances by, and why the
+# number is a flag rather than a constant.
+#
+# A gradient is a sum over every path that reaches a tensor, and compilation is
+# free to fuse and reassociate that sum, so the float32 error in a gradient
+# accumulates over the whole backward rather than over one output element. The
+# M2-2 verification hit the boundary of that: a compiled resnet18 gradient
+# about 1.24e-5 from eager's against a float32 atol of 1e-5, so the same run
+# came back clean or failing depending on which way the last bit fell. Ten is
+# one decimal order, which clears that case, and it is small enough that a real
+# backward-only divergence -- orders of magnitude, not factors -- still fails.
+#
+# Ten is not enough for every model, and this is the honest record of that, per
+# PLAN.md "Tolerance policy" ("start with the assert_close defaults, measure the
+# false-positive rate on the validation set, and only move to per-op tolerances
+# if the defaults prove too tight"). Measured on this repo's own validation
+# target, torchvision resnet18 at 2x3x64x64 on torch 2.14.0+cpu, aarch64, CPU:
+# aot_eager reproduces eager's gradients bit for bit, and inductor needs a
+# factor of about 161 to pass -- 61 of 63 gradients are past 1x and 21 are past
+# 10x. It is not a miscompile. Against a float64 eager reference the two lanes
+# sit at the same order of error (worst relative distance 3.4e-5 for eager
+# against 3.9e-5 for inductor), which is PLAN.md "The oracle blind spot"'s "both
+# imprecise" rather than "compiled is wrong": the assert_close float32 defaults
+# are simply below the noise floor of a deep backward, and no single constant
+# is right for both a two-layer MLP (which needs 1x, bit-identical) and a
+# resnet. So the default clears the measured borderline case, the flag is how a
+# real model is run, and per-op or per-model tolerances are the documented next
+# step rather than a bigger constant here.
+#
+# The tolerances for *outputs* stay exactly where they were: the reason for the
+# looser rule is the backward's accumulation, and nothing else.
+# `--grad-tol-factor 1` turns it off.
+DEFAULT_GRAD_TOL_FACTOR = 10.0
 
 Severity = Literal["fail", "warn", "info"]
 """``fail`` breaks the contract, ``warn`` is a legitimate choice worth seeing,
@@ -89,6 +124,17 @@ class OracleConfig:
     from "the user switched the check off", and the records alone cannot: both
     leave every lane with no gradients. Carried here so the second case can be
     said out loud in the report rather than passing as a clean grad row.
+    """
+
+    grad_tol_factor: float = DEFAULT_GRAD_TOL_FACTOR
+    """``--grad-tol-factor``: what the grad oracle multiplies the tolerances by.
+
+    Applies to gradient *values* only. The presence set is a set comparison with
+    no tolerance to widen, and the output tolerances are deliberately untouched:
+    the looser rule exists because of how a backward pass accumulates, and
+    lending it to the forward comparison would weaken the oracle that catches
+    190765. See :data:`DEFAULT_GRAD_TOL_FACTOR` for the measurement behind the
+    default.
     """
 
     fp64: bool = False

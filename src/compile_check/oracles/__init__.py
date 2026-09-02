@@ -20,6 +20,7 @@ from collections.abc import Sequence
 
 from compile_check.oracles.alias import AliasOracle
 from compile_check.oracles.base import (
+    DEFAULT_GRAD_TOL_FACTOR,
     SEVERITIES,
     Finding,
     Oracle,
@@ -32,6 +33,7 @@ from compile_check.oracles.numerics import NumericsOracle
 from compile_check.results import BackendResult
 
 __all__ = [
+    "DEFAULT_GRAD_TOL_FACTOR",
     "ORACLES",
     "ORACLE_NAMES",
     "SEVERITIES",

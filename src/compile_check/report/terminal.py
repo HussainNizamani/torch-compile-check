@@ -29,7 +29,13 @@ from typing import Any
 
 from compile_check import __version__
 from compile_check.localize import MODEL, NO_REFERENCE, StageVerdict
-from compile_check.oracles import ORACLE_NAMES, ORACLES, Finding, Severity
+from compile_check.oracles import (
+    DEFAULT_GRAD_TOL_FACTOR,
+    ORACLE_NAMES,
+    ORACLES,
+    Finding,
+    Severity,
+)
 from compile_check.results import BackendResult, RunSet
 from compile_check.runner import FP64_BACKEND
 
@@ -96,6 +102,7 @@ def render(
     verdict: StageVerdict,
     *,
     fail_on: Sequence[str] = (),
+    grad_tol_factor: float = DEFAULT_GRAD_TOL_FACTOR,
     max_findings: int = DEFAULT_MAX_FINDINGS,
     color: bool = False,
 ) -> str:
@@ -109,6 +116,13 @@ def render(
             which of them would turn a finding into exit code 1. Every
             implemented oracle runs whatever this says; the flag decides the
             exit code, not which checks happen.
+        grad_tol_factor: ``--grad-tol-factor``, for the environment block. A
+            parameter rather than a field of the runset because it is a
+            comparison knob and not something the runner did: the run is the
+            same run whatever the gradients are later compared against. It is
+            recorded because a clean grad row means a different thing at 10x
+            than at 1x, and a report that did not say which one produced it
+            would not be evidence.
         max_findings: how many findings to print per oracle group. The rest are
             counted, never silently dropped.
         color: emit ANSI colour. ``cli.py`` decides this from ``--color`` and
@@ -120,7 +134,7 @@ def render(
     paint = _painter(color)
     blocks = [
         _header(runset, paint),
-        _environment(runset, paint),
+        _environment(runset, grad_tol_factor, paint),
         _backends(runset, paint),
         _checks(runset, findings, fail_on, paint),
         _findings(findings, max_findings, verdict.compared, paint),
@@ -147,7 +161,7 @@ def _header(runset: RunSet, paint: Paint) -> str:
     return f"{paint('compile-check', 'bold')} {__version__}   target {runset.target_name}"
 
 
-def _environment(runset: RunSet, paint: Paint) -> str:
+def _environment(runset: RunSet, grad_tol_factor: float, paint: Paint) -> str:
     """The environment block that travels with every report.
 
     PLAN.md "Cross-architecture parity is a feature": the architecture is always
@@ -195,9 +209,23 @@ def _environment(runset: RunSet, paint: Paint) -> str:
             if runset.share_module
             else "deep copied per lane",
         ),
+        # The tolerance the gradients were compared under, always printed and
+        # not only when it is non-default: a clean grad row at 10x says
+        # something weaker than a clean grad row at 1x, and a reader cannot tell
+        # them apart from the row above.
+        ("gradients", _grad_line(runset.grad, grad_tol_factor)),
         ("caches", cache_line),
     ]
     return _section("environment", [f"{name:<10}{value}" for name, value in rows], paint)
+
+
+def _grad_line(grad: bool, factor: float) -> str:
+    """How the gradients were compared, in one phrase."""
+    if not grad:
+        return "not compared (--no-grad)"
+    if factor == 1.0:
+        return "compared at the numerics tolerances (--grad-tol-factor 1)"
+    return f"compared at the numerics tolerances x{factor:g} (--grad-tol-factor {factor:g})"
 
 
 def _backends(runset: RunSet, paint: Paint) -> str:

@@ -49,6 +49,7 @@ __all__ = [
     "run_all",
     "run_backend",
     "run_fp64_reference",
+    "seed_everything",
     "validate_backends",
     "validate_device",
 ]
@@ -151,6 +152,24 @@ def validate_backends(backends: Sequence[str], *, defer_unknown: bool = False) -
             "torch._dynamo.list_backends(exclude_tags=()))"
         )
     return list(backends)
+
+
+def seed_everything(seed: int) -> None:
+    """Seed every generator this process draws from, torch included.
+
+    The public spelling of :func:`_seed_everything`, for the one caller that
+    needs to seed *before* it has a reason to touch the runner: the CLI seeds
+    ahead of :func:`compile_check.discover.load_target`, because a target module
+    that builds its model at import time (``model = resnet18(weights=None)``)
+    draws its weights during that import, and a seed applied afterwards cannot
+    reach them. Every lane is seeded again in :func:`run_backend`, which is what
+    makes the lanes comparable; this one is what makes two *runs* comparable.
+
+    Importing torch here is the point at which the CLI pays for it, which is
+    after ``main()`` has set :data:`CACHE_ENV_VAR` and therefore late enough.
+    """
+    torch = importlib.import_module("torch")
+    _seed_everything(torch, seed)
 
 
 def validate_device(device: str) -> str:
