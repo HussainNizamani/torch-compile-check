@@ -5,11 +5,74 @@ observationally equivalent to ``f(x)`` except for speed. Concretely: the same
 numbers, the same aliasing and mutation behaviour, the same dtype, shape, and
 stride, the same gradients, and no silent fallback. Each of the five oracles
 checks one clause of that contract.
+
+Two names, deliberately not one. :data:`ORACLE_NAMES` is the ``--fail-on``
+vocabulary from PLAN.md "CLI surface for v1", which is fixed at five for v1 and
+is what a typo is checked against; :data:`ORACLES` is the registry of the
+oracles that actually run today, so an M1 build reports on what M1 implements
+without the CLI having to hard-code a second list. The two converge when M2 and
+M3 land alias, grad, and graph.
 """
 
 from __future__ import annotations
 
-__all__ = ["ORACLES"]
+from collections.abc import Sequence
 
-# Also the vocabulary of --fail-on, in the order PLAN.md "Oracles" lists them.
-ORACLES: tuple[str, ...] = ("numerics", "alias", "metadata", "grad", "graph")
+from compile_check.oracles.base import (
+    SEVERITIES,
+    Finding,
+    Oracle,
+    OracleConfig,
+    Severity,
+)
+from compile_check.oracles.metadata import MetadataOracle
+from compile_check.oracles.numerics import NumericsOracle
+from compile_check.results import BackendResult
+
+__all__ = [
+    "ORACLES",
+    "ORACLE_NAMES",
+    "SEVERITIES",
+    "Finding",
+    "Oracle",
+    "OracleConfig",
+    "Severity",
+    "run_oracles",
+]
+
+# The --fail-on vocabulary, in the order PLAN.md "Oracles" lists them.
+ORACLE_NAMES: tuple[str, ...] = ("numerics", "alias", "metadata", "grad", "graph")
+
+# The oracles a run can actually use, keyed by their --fail-on name. alias and
+# grad land in M2, graph in M3; until then a --fail-on naming them parses and is
+# reported as not yet running rather than silently passing.
+ORACLES: dict[str, Oracle] = {
+    "numerics": NumericsOracle(),
+    "metadata": MetadataOracle(),
+}
+
+
+def run_oracles(
+    eager: BackendResult,
+    other: BackendResult,
+    cfg: OracleConfig,
+    names: Sequence[str] | None = None,
+) -> list[Finding]:
+    """Run the implemented oracles over one backend and collect their findings.
+
+    Args:
+        eager: the reference world.
+        other: the lane under test.
+        cfg: the run's tolerances and flags.
+        names: restrict to these categories; unknown or not-yet-implemented
+            names are skipped, since :func:`compile_check.cli.parse_fail_on` is
+            where a typo is reported. ``None`` runs every implemented oracle.
+
+    Returns:
+        Every finding, grouped by oracle in registry order.
+    """
+    selected = ORACLES.values() if names is None else [ORACLES[n] for n in names if n in ORACLES]
+    findings: list[Finding] = []
+    for oracle in selected:
+        findings.extend(oracle.compare(eager, other, cfg))
+    return findings

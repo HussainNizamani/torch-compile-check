@@ -176,10 +176,11 @@ def test_every_module_imports():
 
 
 def test_stubs_raise_not_implemented():
-    # discover.py and runner.py landed in M1-1 and are covered by their own
-    # test modules; what is left below is what M1-2 and M1-3 still owe.
+    # discover.py and runner.py landed in M1-1, the numerics and metadata
+    # oracles in M1-2, and each is covered by its own test module; what is left
+    # below is what M2 and M3 still owe.
     from compile_check import localize, minimize
-    from compile_check.oracles import alias, grad, graph, metadata, numerics
+    from compile_check.oracles import alias, grad, graph
     from compile_check.report import json as json_report
     from compile_check.report import markdown, pytest_case, terminal
 
@@ -187,7 +188,7 @@ def test_stubs_raise_not_implemented():
         localize.implicated_stage("inductor")
     with pytest.raises(NotImplementedError):
         minimize.minimize(None, None, lambda _fn, _inputs: True)
-    for oracle in (numerics, alias, metadata, grad, graph):
+    for oracle in (alias, grad, graph):
         with pytest.raises(NotImplementedError):
             oracle.check({}, {})
     with pytest.raises(NotImplementedError):
