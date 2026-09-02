@@ -22,6 +22,7 @@ import torch
 from compile_check.discover import Target, import_target_module, load_target
 from compile_check.localize import localize
 from compile_check.oracles import (
+    DEFAULT_GRAD_TOL_FACTOR,
     ORACLE_NAMES,
     ORACLES,
     Finding,
@@ -838,7 +839,12 @@ def test_a_perturbed_gradient_is_a_fail_naming_the_parameter():
     assert finding.message.startswith("the gradient of parameter b differs: ")
     # The message is assert_close's, because the rule is the numerics rule.
     assert "Mismatched elements: 2 / 2" in finding.message
-    assert finding.details["rtol"] == pytest.approx(1.3e-6)
+    # The numerics float32 rtol of 1.3e-6, times the grad factor, and the factor
+    # itself alongside it: the tolerance a reader sees has to be the tolerance
+    # the decision was made with, and at 10x it is not the one the numerics rows
+    # of the same report were compared under.
+    assert finding.details["rtol"] == pytest.approx(1.3e-6 * DEFAULT_GRAD_TOL_FACTOR)
+    assert finding.details["tol_factor"] == DEFAULT_GRAD_TOL_FACTOR
 
 
 def test_gradients_go_through_the_numerics_tolerances():
@@ -851,6 +857,49 @@ def test_gradients_go_through_the_numerics_tolerances():
     beyond = {"w": torch.ones(8) + 0.5}
     assert len(GRAD.compare(*grad_pair(expected, beyond), CFG)) == 1
     assert GRAD.compare(*grad_pair(expected, beyond), OracleConfig(atol=1.0)) == []
+
+
+def test_the_grad_tolerance_factor_is_what_decides_a_borderline_gradient():
+    # M2-3 housekeeping (b), as the measurement that produced it: the M2-2
+    # verifier saw a compiled resnet18 gradient about 1.24e-5 from eager's
+    # against a float32 atol of 1e-5, so the same run flipped between clean and
+    # failing. 1.24e-5 is the number, not a round one, and the point of the test
+    # is that the factor is the only thing that decides it.
+    expected = {"w": torch.ones(8)}
+    borderline = {"w": torch.ones(8) + 1.24e-5}
+
+    exact = GRAD.compare(*grad_pair(expected, borderline), OracleConfig(grad_tol_factor=1.0))
+    assert [finding.details["field"] for finding in exact] == ["grad_values"]
+    assert "tol_factor" not in exact[0].details, "a factor of 1 is not worth a detail line"
+    assert exact[0].details["atol"] == pytest.approx(1e-5)
+
+    assert GRAD.compare(*grad_pair(expected, borderline), CFG) == []
+
+
+def test_the_grad_tolerance_factor_does_not_reach_the_outputs():
+    # The half that keeps the policy honest: the looser rule exists because of
+    # how a backward accumulates, so it must not widen the comparison that
+    # catches 190765. Same distance, same config, two different verdicts.
+    borderline = torch.ones(8) + 1.24e-5
+    output_findings = NUMERICS.compare(*pair(torch.ones(8), borderline), CFG)
+
+    assert [finding.severity for finding in output_findings] == ["fail"]
+    assert output_findings[0].details["atol"] == pytest.approx(1e-5)
+    assert GRAD.compare(*grad_pair({"w": torch.ones(8)}, {"w": borderline}), CFG) == []
+
+
+def test_the_grad_tolerance_factor_multiplies_the_rtol_and_atol_overrides():
+    # Applied last, after --rtol and --atol, so the policy is one rule rather
+    # than two that interact: --atol 1e-6 compares outputs at 1e-6 and gradients
+    # at ten times that.
+    cfg = OracleConfig(atol=1e-6, rtol=0.0, grad_tol_factor=10.0)
+    expected = {"w": torch.zeros(4)}
+
+    assert GRAD.compare(*grad_pair(expected, {"w": torch.full((4,), 9e-6)}), cfg) == []
+    findings = GRAD.compare(*grad_pair(expected, {"w": torch.full((4,), 2e-5)}), cfg)
+    assert [finding.details["field"] for finding in findings] == ["grad_values"]
+    assert findings[0].details["atol"] == pytest.approx(1e-5)
+    assert findings[0].details["rtol"] == pytest.approx(0.0)
 
 
 def test_a_backward_that_raised_in_one_lane_only_is_a_fail():

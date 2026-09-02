@@ -23,7 +23,7 @@ from compile_check.cli import (
     parse_fail_on,
 )
 from compile_check.env import PROBED_APIS
-from compile_check.oracles import Finding
+from compile_check.oracles import DEFAULT_GRAD_TOL_FACTOR, Finding
 from compile_check.report.terminal import DEFAULT_MAX_FINDINGS
 from compile_check.results import BackendResult, RunSet
 
@@ -137,6 +137,8 @@ def test_full_v1_flag_surface_parses():
             "1e-5",
             "--atol",
             "1e-8",
+            "--grad-tol-factor",
+            "4",
             "--seed",
             "1234",
             "--allow-caches",
@@ -165,6 +167,7 @@ def test_full_v1_flag_surface_parses():
     assert args.dynamic is True
     assert args.rtol == pytest.approx(1e-5)
     assert args.atol == pytest.approx(1e-8)
+    assert args.grad_tol_factor == pytest.approx(4.0)
     assert args.seed == 1234
     assert args.allow_caches is True
     assert args.fp64_oracle is True
@@ -186,6 +189,7 @@ def test_defaults_match_the_plan():
     assert args.dynamic is False
     assert args.no_grad is False
     assert args.share_module is False
+    assert args.grad_tol_factor == pytest.approx(DEFAULT_GRAD_TOL_FACTOR)
     assert args.max_findings == DEFAULT_MAX_FINDINGS
     assert args.color == "auto"
 
@@ -1011,3 +1015,122 @@ def test_allow_caches_leaves_the_variable_alone_and_the_report_says_so(tmp_path)
 
     assert completed.returncode == EXIT_OK, completed.stderr
     assert "ENABLED (force_disable_caches=False, --allow-caches)" in completed.stdout
+
+
+# The M2-3 housekeeping: --seed is applied before the target module is imported.
+# The probe runs the CLI in a fresh interpreter and then hashes what the target
+# computes, because that is the only place the weights are observable: a model
+# built at module scope is drawn during load_target, and the report prints
+# shapes rather than values.
+_SEED_PROBE = """
+import hashlib
+from compile_check.cli import main
+from compile_check.discover import load_target
+
+path = {path!r}
+code = main([path, "--backends", "eager", "--seed", "{seed}", "--color", "never"])
+target = load_target(path)
+values = target.fn(*target.example_inputs).detach().flatten().tolist()
+print("EXIT", code)
+print("DIGEST", hashlib.sha256(repr(values).encode()).hexdigest())
+"""
+
+
+def _seed_probe(tmp_path, seed: int) -> tuple[int, str]:
+    """Run the CLI on the random-at-import fixture and hash its eager output."""
+    env = dict(os.environ)
+    env["TORCHINDUCTOR_CACHE_DIR"] = str(tmp_path / "codegen")
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            _SEED_PROBE.format(path=str(FIXTURES / "random_at_import.py"), seed=seed),
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert completed.returncode == 0, f"{completed.stdout}\n{completed.stderr}"
+    lines = dict(line.split(" ", 1) for line in completed.stdout.splitlines() if " " in line)
+    assert lines.get("EXIT") == str(EXIT_OK), completed.stdout
+    return EXIT_OK, lines["DIGEST"]
+
+
+def test_the_seed_reaches_a_model_built_while_the_target_is_imported(tmp_path):
+    # M2-3 housekeeping (a). tests/fixtures/random_at_import.py builds its
+    # Linear at module scope, the way torchvision's resnet18(weights=None) is
+    # written, so its weights are drawn inside load_target. Seeding after that
+    # import -- which is what the CLI did until this slice -- left them fresh on
+    # every invocation, and --seed said nothing about the model under test.
+    #
+    # Two assertions, because only the pair is evidence. Same seed twice must
+    # give the same weights, which is what was broken; and a different seed must
+    # give different weights, which is what says the determinism comes from the
+    # seed rather than from torch happening to start in a fixed state.
+    _, first = _seed_probe(tmp_path, 0)
+    _, again = _seed_probe(tmp_path, 0)
+    _, other = _seed_probe(tmp_path, 1)
+
+    assert first == again, "two runs with --seed 0 built two different models"
+    assert first != other, "--seed 1 built the same model as --seed 0, so nothing was seeded"
+
+
+def test_a_negative_grad_tol_factor_is_a_tool_error(capsys):
+    code = main([str(FIXTURES / "mlp.py"), "--grad-tol-factor", "-2"])
+    err = capsys.readouterr().err
+
+    assert code == EXIT_ERROR
+    assert "--grad-tol-factor must not be negative, got -2" in err
+
+
+def test_the_report_records_the_grad_tolerance_factor(capsys):
+    # M2-3 housekeeping (b). A clean grad row means a weaker thing at 10x than
+    # at 1x, so the factor that produced it travels with the report: PLAN.md
+    # "Cross-architecture parity is a feature" is about two reports being
+    # comparable, and two reports compared under different tolerances are not.
+    assert main([str(FIXTURES / "mlp.py"), "--backends", "eager,aot_eager"]) == EXIT_OK
+    assert (
+        "gradients compared at the numerics tolerances x10 (--grad-tol-factor 10)"
+        in capsys.readouterr().out
+    )
+
+    assert (
+        main(
+            [
+                str(FIXTURES / "mlp.py"),
+                "--backends",
+                "eager,aot_eager",
+                "--grad-tol-factor",
+                "1",
+            ]
+        )
+        == EXIT_OK
+    )
+    assert (
+        "gradients compared at the numerics tolerances (--grad-tol-factor 1)"
+        in capsys.readouterr().out
+    )
+
+
+def test_no_grad_says_the_gradients_were_not_compared_at_all(capsys):
+    # The third state of the same row: --no-grad is neither 1x nor 10x, and a
+    # tolerance printed for a comparison that did not happen would be a lie.
+    assert main([str(FIXTURES / "mlp.py"), "--backends", "eager", "--no-grad"]) == EXIT_OK
+    assert "gradients not compared (--no-grad)" in capsys.readouterr().out
+
+
+def test_run_only_records_the_grad_tolerance_factor(capsys):
+    assert (
+        main(
+            [
+                str(FIXTURES / "mlp.py"),
+                "--run-only",
+                "--backends",
+                "eager",
+                "--grad-tol-factor",
+                "3",
+            ]
+        )
+        == EXIT_OK
+    )
+    assert "grad tol   x3 on the numerics tolerances (--grad-tol-factor)" in capsys.readouterr().out

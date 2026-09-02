@@ -60,7 +60,13 @@ FALLBACK_TOLERANCES: dict[str, tuple[float, float]] = {
 }
 
 
-def resolve_tolerances(torch: Any, dtypes: Sequence[Any], cfg: OracleConfig) -> tuple[float, float]:
+def resolve_tolerances(
+    torch: Any,
+    dtypes: Sequence[Any],
+    cfg: OracleConfig,
+    *,
+    factor: float = 1.0,
+) -> tuple[float, float]:
     """The ``(rtol, atol)`` this comparison runs with.
 
     ``--rtol`` and ``--atol`` override per dtype and independently: passing only
@@ -73,6 +79,14 @@ def resolve_tolerances(torch: Any, dtypes: Sequence[Any], cfg: OracleConfig) -> 
             though ``check_dtype=False``, because ``assert_close`` promotes and
             then uses the loosest tolerance of the dtypes involved.
         cfg: the run configuration holding the overrides.
+        factor: scales both tolerances, last, after the overrides. The grad
+            oracle passes ``cfg.grad_tol_factor`` here
+            (:data:`~compile_check.oracles.base.DEFAULT_GRAD_TOL_FACTOR`); every
+            other caller leaves it at 1. Applied after the overrides on purpose:
+            it is a property of what is being compared, not of what the user
+            asked for, so ``--atol 1e-6 --grad-tol-factor 10`` compares
+            gradients at 1e-5 and outputs at 1e-6, which is the policy stated in
+            one place rather than two rules that interact.
 
     Returns:
         The relative and absolute tolerance.
@@ -82,7 +96,7 @@ def resolve_tolerances(torch: Any, dtypes: Sequence[Any], cfg: OracleConfig) -> 
         rtol = cfg.rtol
     if cfg.atol is not None:
         atol = cfg.atol
-    return rtol, atol
+    return rtol * factor, atol * factor
 
 
 @dataclass(frozen=True)
@@ -102,7 +116,14 @@ class Mismatch:
     """The tolerances the decision was made with, and the two dtypes."""
 
 
-def compare_tensors(torch: Any, expected: Any, got: Any, cfg: OracleConfig) -> Mismatch | None:
+def compare_tensors(
+    torch: Any,
+    expected: Any,
+    got: Any,
+    cfg: OracleConfig,
+    *,
+    tol_factor: float = 1.0,
+) -> Mismatch | None:
     """Compare two tensors under PLAN.md's numerics rule, or say why not.
 
     The one place the rule lives, so that the grad oracle of M2-2 compares a
@@ -121,6 +142,9 @@ def compare_tensors(torch: Any, expected: Any, got: Any, cfg: OracleConfig) -> M
         expected: the reference tensor, from the eager lane.
         got: the tensor under test.
         cfg: the run's tolerances.
+        tol_factor: scales both tolerances, for a caller whose comparison is
+            looser by policy. The grad oracle is the only one today; see
+            :func:`resolve_tolerances`.
 
     Returns:
         ``None`` when the two agree within tolerance, or the :class:`Mismatch`
@@ -128,13 +152,18 @@ def compare_tensors(torch: Any, expected: Any, got: Any, cfg: OracleConfig) -> M
         is a mismatch too, with the error in its message: a value the tool could
         not check must not read as a value that passed.
     """
-    rtol, atol = resolve_tolerances(torch, (expected.dtype, got.dtype), cfg)
+    rtol, atol = resolve_tolerances(torch, (expected.dtype, got.dtype), cfg, factor=tol_factor)
     details: dict[str, Any] = {
         "rtol": rtol,
         "atol": atol,
         "expected_dtype": str(expected.dtype),
         "got_dtype": str(got.dtype),
     }
+    if tol_factor != 1.0:
+        # Said out loud in the finding, because the same two tensors compared
+        # under the output rule would have been a fail and a reader has to be
+        # able to see which rule produced the number above.
+        details["tol_factor"] = tol_factor
     try:
         torch.testing.assert_close(
             got,

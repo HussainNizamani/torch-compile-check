@@ -120,6 +120,7 @@ environment
   device    cpu   cuda available no
   run       backends eager, aot_eager, inductor   seed 0   fullgraph off   dynamic off   grad on
   module    deep copied per lane
+  gradients compared at the numerics tolerances x10 (--grad-tol-factor 10)
   caches    disabled (force_disable_caches=True)
 
 backends
@@ -159,6 +160,7 @@ environment
   device    cpu   cuda available no
   run       backends eager, aot_eager, inductor   seed 0   fullgraph off   dynamic off   grad on
   module    deep copied per lane
+  gradients compared at the numerics tolerances x10 (--grad-tol-factor 10)
   caches    disabled (force_disable_caches=True)
 
 backends

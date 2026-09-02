@@ -34,7 +34,14 @@ from typing import Any
 from compile_check import __version__
 from compile_check.env import probe_apis
 from compile_check.localize import StageVerdict, localize
-from compile_check.oracles import ORACLE_NAMES, ORACLES, Finding, OracleConfig, run_oracles
+from compile_check.oracles import (
+    DEFAULT_GRAD_TOL_FACTOR,
+    ORACLE_NAMES,
+    ORACLES,
+    Finding,
+    OracleConfig,
+    run_oracles,
+)
 from compile_check.report.terminal import DEFAULT_MAX_FINDINGS, render
 from compile_check.results import RunSet
 
@@ -203,10 +210,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="override the numerics absolute tolerance for every dtype",
     )
     parser.add_argument(
+        "--grad-tol-factor",
+        metavar="N",
+        type=float,
+        default=DEFAULT_GRAD_TOL_FACTOR,
+        help=(
+            "what the grad oracle multiplies the numerics tolerances by "
+            f"(default: {DEFAULT_GRAD_TOL_FACTOR:g}); gradients accumulate in a "
+            "different order under compilation, so they are compared by a looser "
+            "rule than outputs are, and the output tolerances are unchanged. "
+            "Pass 1 to compare gradients exactly as outputs are compared"
+        ),
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=DEFAULT_SEED,
-        help=f"RNG seed (default: {DEFAULT_SEED})",
+        help=(
+            f"RNG seed (default: {DEFAULT_SEED}); applied before the target module "
+            "is imported, so a model built at import time gets the same weights on "
+            "every run, and again before every backend"
+        ),
     )
     parser.add_argument(
         "--allow-caches",
@@ -304,6 +328,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             "(0 prints the counts and none of the findings)"
         )
 
+    if args.grad_tol_factor < 0:
+        # A negative tolerance is not a tolerance. Zero is allowed and means
+        # "compare gradients bitwise", which is a defensible thing to ask for;
+        # below one is allowed too and tightens the rule.
+        return _tool_error(
+            f"--grad-tol-factor must not be negative, got {args.grad_tol_factor:g} "
+            "(1 compares gradients exactly as outputs are compared, 0 demands "
+            "bit-for-bit equality)"
+        )
+
     if args.path is None:
         print(
             f"{PROG}: needs a target, a python file or a dotted module holding "
@@ -336,13 +370,7 @@ def run(args: argparse.Namespace) -> int:
     if runset is None:
         return EXIT_ERROR
 
-    cfg = OracleConfig(
-        rtol=args.rtol,
-        atol=args.atol,
-        grad=not args.no_grad,
-        fp64=args.fp64_oracle,
-        fp64_reference=runset.fp64,
-    )
+    cfg = _oracle_config(args, runset)
     findings = _compare_backends(runset, cfg)
     verdict = localize(runset, findings)
     print(
@@ -351,11 +379,29 @@ def run(args: argparse.Namespace) -> int:
             findings,
             verdict,
             fail_on=fail_on,
+            grad_tol_factor=cfg.grad_tol_factor,
             max_findings=args.max_findings,
             color=_use_color(args.color),
         )
     )
     return _exit_code(findings, verdict, fail_on)
+
+
+def _oracle_config(args: argparse.Namespace, runset: RunSet) -> OracleConfig:
+    """The knobs the oracles read, built once for both paths.
+
+    ``run`` and ``run_only`` compare with the same rules on purpose: the
+    developer path exists to show the records behind a verdict, and a config
+    that drifted between the two would make it show a different run.
+    """
+    return OracleConfig(
+        rtol=args.rtol,
+        atol=args.atol,
+        grad=not args.no_grad,
+        grad_tol_factor=args.grad_tol_factor,
+        fp64=args.fp64_oracle,
+        fp64_reference=runset.fp64,
+    )
 
 
 def _exit_code(
@@ -429,12 +475,27 @@ def _guarded_run(args: argparse.Namespace) -> tuple[RunSet | None, list[str]]:
     ``--backends`` -- and :func:`compile_check.runner.run_all` validates for
     real, after the import and before anything is compiled.
 
+    ``--seed`` is applied here, before ``load_target``, and again per lane
+    inside the runner (M2-3 housekeeping). The two are different guarantees. Per
+    lane is what makes the lanes comparable within one run; this one is what
+    makes two runs comparable, because a target that builds its model at import
+    time draws its weights while ``load_target`` is executing the module, and a
+    seed applied after that import has already missed them. Without it, a
+    ``model = resnet18(weights=None)`` target got fresh random weights on every
+    invocation and ``--seed`` said nothing about them.
+
     Returns:
         The runset and the parsed ``--fail-on`` categories, or ``(None, [])``
         once a one-line tool error has been printed to stderr.
     """
     from compile_check.discover import DiscoveryError, load_target
-    from compile_check.runner import RunnerError, run_all, validate_backends, validate_device
+    from compile_check.runner import (
+        RunnerError,
+        run_all,
+        seed_everything,
+        validate_backends,
+        validate_device,
+    )
 
     backends = [name.strip() for name in args.backends.split(",") if name.strip()]
     try:
@@ -448,6 +509,7 @@ def _guarded_run(args: argparse.Namespace) -> tuple[RunSet | None, list[str]]:
     try:
         validate_backends(backends, defer_unknown=True)
         validate_device(args.device)
+        seed_everything(args.seed)
         target = load_target(args.path, entry=args.entry, inputs=args.inputs)
         runset = run_all(
             target,
@@ -513,14 +575,15 @@ def run_only(args: argparse.Namespace) -> int:
     if runset is None:
         return EXIT_ERROR
 
-    cfg = OracleConfig(
-        rtol=args.rtol,
-        atol=args.atol,
-        grad=not args.no_grad,
-        fp64=args.fp64_oracle,
-        fp64_reference=runset.fp64,
+    cfg = _oracle_config(args, runset)
+    print(
+        format_run_only(
+            runset,
+            _compare_backends(runset, cfg),
+            fail_on=fail_on,
+            grad_tol_factor=cfg.grad_tol_factor,
+        )
     )
-    print(format_run_only(runset, _compare_backends(runset, cfg), fail_on=fail_on))
 
     eager = runset.eager
     if eager is not None and not eager.ok:
@@ -571,6 +634,7 @@ def format_run_only(
     findings: Sequence[Finding] = (),
     *,
     fail_on: Sequence[str] = (),
+    grad_tol_factor: float = DEFAULT_GRAD_TOL_FACTOR,
 ) -> str:
     """Render a :class:`~compile_check.results.RunSet` for the developer path."""
     env = runset.env
@@ -583,6 +647,7 @@ def format_run_only(
         f"caches     force_disable_caches={env.get('inductor_force_disable_caches')}",
     ]
     lines.append(f"oracles    {_format_oracles()}")
+    lines.append(f"grad tol   x{grad_tol_factor:g} on the numerics tolerances (--grad-tol-factor)")
     if fail_on:
         # Named separately from the oracles that ran, because the two are
         # different questions: what was checked, and what would fail the run.

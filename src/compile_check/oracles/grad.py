@@ -21,8 +21,22 @@ Three rules, stated once so they are not re-derived from the code:
   in the other is a divergence whatever the gradients that did arrive say, and
   the finding names the parameter.
 * the values, through :func:`compile_check.oracles.numerics.compare_tensors`, so
-  a gradient is compared exactly the way an output is: the same per-dtype
-  tolerances and the same ``--rtol`` and ``--atol`` overrides.
+  a gradient is compared by the same rule an output is: the same per-dtype
+  tolerances, the same ``--rtol`` and ``--atol`` overrides, and then one
+  deliberate loosening. Both tolerances are multiplied by
+  ``cfg.grad_tol_factor``
+  (:data:`~compile_check.oracles.base.DEFAULT_GRAD_TOL_FACTOR`, ``10``, settable
+  with ``--grad-tol-factor``), because a gradient is a sum over every path that
+  reaches a tensor and compilation is free to fuse and reassociate that sum. The
+  M2-2 verification measured the boundary of it: a compiled resnet18 backward
+  sat about 1.24e-5 from eager's against a float32 atol of 1e-5, close enough
+  that the same run came back clean or failing depending on the last bit. Ten
+  clears that and does not clear every model -- see
+  :data:`~compile_check.oracles.base.DEFAULT_GRAD_TOL_FACTOR` for what a whole
+  resnet18 backward actually needs, which is why the number is a flag. The
+  output tolerances are untouched -- the reason for the looser rule is the
+  backward's accumulation and nothing else, and lending it to the forward
+  comparison would blunt the oracle that catches 190765.
 
 What this oracle deliberately does not check is the ``requires_grad`` flag on
 the outputs. That is a field of PLAN.md "metadata", the metadata oracle compares
@@ -183,7 +197,7 @@ class GradOracle:
                 # Already reported by the presence comparison, in a sentence
                 # that says more than a failed value comparison would.
                 continue
-            mismatch = compare_tensors(torch, expected, got, cfg)
+            mismatch = compare_tensors(torch, expected, got, cfg, tol_factor=cfg.grad_tol_factor)
             if mismatch is None:
                 continue
             findings.append(
