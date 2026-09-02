@@ -154,6 +154,7 @@ def run_all(
     grad: bool = True,
     disable_caches: bool = True,
     fp64: bool = False,
+    share_module: bool = False,
 ) -> RunSet:
     """Run ``target`` under every backend in ``backends`` and record the results.
 
@@ -172,6 +173,9 @@ def run_all(
             recorded on :attr:`~compile_check.results.RunSet.fp64`, not among
             the backends, and a target that cannot be run at float64 leaves it
             ``None`` rather than failing the run.
+        share_module: hand every lane the same ``nn.Module`` object instead of
+            its own deep copy (``--share-module``). See :func:`_lane_module` for
+            what the copy buys and what it costs.
 
     Returns:
         One :class:`~compile_check.results.BackendResult` per backend, in the
@@ -203,6 +207,7 @@ def run_all(
         fullgraph=fullgraph,
         dynamic=dynamic,
         grad=grad,
+        share_module=share_module,
         env=collect_environment(),
     )
     if fp64:
@@ -216,7 +221,7 @@ def run_all(
     for backend in backends:
         log.debug("running backend %s", backend)
         runset.results[backend] = run_backend(
-            fn,
+            _lane_module(torch, fn, share_module),
             target.example_inputs,
             backend,
             kwargs=target.kwargs,
@@ -227,6 +232,45 @@ def run_all(
             grad=grad,
         )
     return runset
+
+
+def _lane_module(torch: Any, fn: Any, share: bool) -> Any:
+    """The module object one lane runs against: its own copy, or the shared one.
+
+    PLAN.md "Runner semantics" isolates the *inputs* per backend so that a
+    mutation by one lane is invisible to the next. A module's own state needs
+    the same treatment and did not have it until M2-2: a buffer that the forward
+    pass writes to -- a step counter, BatchNorm running statistics in train mode
+    -- is carried into the next lane, so the second lane computes with a state
+    the first one left behind and the numerics oracle reports a divergence that
+    the backend did not cause. Each lane therefore gets its own deep copy.
+
+    The cost is memory: one extra copy of the parameters and buffers is alive
+    while a lane runs, so a run peaks at the user's module plus one copy rather
+    than at the module alone. It is bounded by the model, not by the number of
+    lanes -- the previous lane's copy is dropped when the next one is made --
+    and ``--share-module`` turns it off for a model too large to copy, at the
+    price of the false divergence above.
+
+    A plain callable is handed back as it is. A function has no state to isolate,
+    and PLAN.md's discovery convention makes ``nn.Module`` the stateful case.
+    """
+    if share or not isinstance(fn, torch.nn.Module):
+        return fn
+    try:
+        return copy.deepcopy(fn)
+    except Exception as exc:
+        # Not fatal: a module that refuses to be copied still runs, and a lane
+        # that shares state is better than a run that does not happen. Said out
+        # loud, because it is the condition under which a numerics finding may
+        # be the harness's doing rather than the backend's.
+        log.warning(
+            "this module could not be deep copied (%s: %s), so every lane shares one "
+            "object; a stateful forward pass can make the lanes disagree by itself",
+            type(exc).__name__,
+            exc,
+        )
+        return fn
 
 
 def run_fp64_reference(

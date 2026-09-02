@@ -146,6 +146,7 @@ def test_full_v1_flag_surface_parses():
             "--baseline",
             "graph-baseline.json",
             "--no-grad",
+            "--share-module",
             "--max-findings",
             "3",
             "--color",
@@ -170,6 +171,7 @@ def test_full_v1_flag_surface_parses():
     assert args.budget == pytest.approx(600.0)
     assert args.baseline == "graph-baseline.json"
     assert args.no_grad is True
+    assert args.share_module is True
     assert args.max_findings == 3
     assert args.color == "never"
 
@@ -183,6 +185,7 @@ def test_defaults_match_the_plan():
     assert args.fullgraph is False
     assert args.dynamic is False
     assert args.no_grad is False
+    assert args.share_module is False
     assert args.max_findings == DEFAULT_MAX_FINDINGS
     assert args.color == "auto"
 

@@ -184,6 +184,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--share-module",
+        action="store_true",
+        help=(
+            "run every backend against one module object instead of giving each "
+            "lane its own deep copy; saves the memory of one copy of the weights "
+            "and lets a buffer written by the forward pass leak into the next lane"
+        ),
+    )
+    parser.add_argument(
         "--rtol",
         type=float,
         help="override the numerics relative tolerance for every dtype",
@@ -441,6 +450,7 @@ def _guarded_run(args: argparse.Namespace) -> tuple[RunSet | None, list[str]]:
             grad=not args.no_grad,
             disable_caches=not args.allow_caches,
             fp64=args.fp64_oracle,
+            share_module=args.share_module,
         )
     except (DiscoveryError, RunnerError) as exc:
         # Ours, with a message written for a user: print it as it is.

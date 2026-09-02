@@ -197,6 +197,16 @@ class RunSet:
     fullgraph: bool
     dynamic: bool
     grad: bool
+    share_module: bool = False
+    """``--share-module``: every lane ran against one ``nn.Module`` object.
+
+    Recorded because it changes what a divergence means. With the default, each
+    lane deep copies the module and a buffer the forward pass writes to cannot
+    leak from one lane into the next; with the flag on, it can, and a numerics
+    finding may be the harness's doing. A report that did not say which mode
+    produced it would leave that ambiguous.
+    """
+
     results: dict[str, BackendResult] = field(default_factory=dict)
     env: dict[str, Any] = field(default_factory=dict)
     """``env.collect_environment()``, taken after torch was imported and after
