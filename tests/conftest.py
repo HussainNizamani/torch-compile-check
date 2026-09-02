@@ -42,6 +42,18 @@ if not os.environ.get(CACHE_DIR_VAR):
 assert "torch" not in sys.modules, "conftest.py must run before torch is imported"
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# `cases` is corpus data, not shipped code: it is deliberately outside
+# src/compile_check and so is not on the path that `pip install -e .` puts
+# there. The two corpus test modules read `cases.markers` for the version
+# markers and `cases.summary` for the one way to run a standalone script, so the
+# repository root goes on the path here, where it applies to every test module
+# and is explained once. `cases` needs no __init__.py for this; it resolves as a
+# namespace package, which is also what makes `python -m cases.summary` work
+# from the repository root in CI.
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 
 def pytest_sessionfinish(session, exitstatus) -> None:
