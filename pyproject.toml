@@ -1,0 +1,107 @@
+# Build backend: hatchling.
+#
+# Reason for the choice, so it is not re-litigated: hatchling reads PEP 621
+# metadata natively, supports the src/ layout with no shim files (no setup.py,
+# no setup.cfg, no MANIFEST.in), ships `py.typed` and package data without an
+# include manifest, and pins its own behaviour by version. setuptools would
+# work too; it would cost three extra files and a moving target of deprecation
+# warnings around the license fields.
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "compile-check"
+version = "0.0.1.dev0"
+description = "Differential testing for torch.compile: does compiling your model change its answers?"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Hussain Nizamani" }]
+keywords = ["pytorch", "torch.compile", "inductor", "testing", "differential-testing"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Software Development :: Testing",
+  "Typing :: Typed",
+]
+# PLAN.md "Engineering decisions": pure Python, torch is the only runtime
+# dependency, argument parsing is stdlib argparse.
+dependencies = ["torch>=2.4"]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.6",
+  "mypy>=1.11",
+  "pre-commit>=3.7",
+]
+
+[project.scripts]
+compile-check = "compile_check.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/HussainNizamani/compile-check"
+Source = "https://github.com/HussainNizamani/compile-check"
+Issues = "https://github.com/HussainNizamani/compile-check/issues"
+Changelog = "https://github.com/HussainNizamani/compile-check/blob/main/CHANGELOG.md"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/compile_check"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+  "A",    # builtin shadowing
+  "B",    # bugbear
+  "C4",   # comprehensions
+  "E",    # pycodestyle errors
+  "F",    # pyflakes
+  "I",    # import sorting
+  "N",    # pep8-naming
+  "PT",   # pytest style
+  "PTH",  # pathlib over os.path
+  "RET",  # return style
+  "RUF",  # ruff rules
+  "SIM",  # simplify
+  "T20",  # no print
+  "UP",   # pyupgrade
+  "W",    # pycodestyle warnings
+]
+
+# PLAN.md and the M0 brief: no `print` outside cli.py and report/.
+[tool.ruff.lint.per-file-ignores]
+"src/compile_check/cli.py" = ["T20"]
+"src/compile_check/report/*.py" = ["T20"]
+# report/json.py is named after the artifact it writes, per PLAN.md "Package
+# layout"; the stdlib module stays reachable because imports are absolute.
+"src/compile_check/report/json.py" = ["A005"]
+"tests/*.py" = ["T20"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["compile_check"]
+
+[tool.mypy]
+# PLAN.md "Engineering decisions": mypy strict over the package, not over tests
+# or cases.
+files = ["src"]
+python_version = "3.10"
+strict = true
+warn_unreachable = true
+pretty = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
