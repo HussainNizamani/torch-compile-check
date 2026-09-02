@@ -3,16 +3,24 @@
 PLAN.md "Package layout": ``cli.py`` -- argparse surface, exit codes.
 
 The whole v1 flag surface from PLAN.md "CLI surface for v1" is parsed here, so
-that the surface is fixed and testable from M0 onwards. Two paths do real work
-in M0, ``--version`` and ``--probe``; every other invocation exits 2, which is
-the plan's exit code for a tool error.
+that the surface is fixed and testable from M0 onwards. Three paths do real work
+so far, ``--version``, ``--probe``, and the hidden developer path
+``--run-only``; every other invocation exits 2, which is the plan's exit code
+for a tool error, until M1-3 wires the oracles, the localization, and the
+terminal report into the main path.
+
+Torch is imported only inside ``main()``, after the cache environment variable
+has been set, and only on a path that actually runs a model. A test asserts that
+importing this module does not import torch.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from collections.abc import Mapping, Sequence
+from typing import Any
 
 from compile_check import __version__
 from compile_check.env import probe_apis
@@ -33,7 +41,8 @@ DEFAULT_FAIL_ON = "numerics,alias,metadata,grad"
 DEFAULT_SEED = 0
 
 NOT_IMPLEMENTED_MESSAGE = (
-    f"{PROG}: not implemented in M0 (scaffold only); the paths that work are --version and --probe"
+    f"{PROG}: the full run is not implemented yet (it lands in M1-3); the paths "
+    "that work are --version, --probe, and --run-only"
 )
 
 _EPILOG = """\
@@ -71,6 +80,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--probe",
         action="store_true",
         help="print the torch API probe as a table and exit",
+    )
+    # Hidden: a developer path that runs discovery and the runner and prints
+    # what came back, so the runner can be exercised end to end before M1-3
+    # wires the oracles and the real report. Not part of the v1 surface.
+    parser.add_argument(
+        "--run-only",
+        action="store_true",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--entry",
@@ -192,8 +209,124 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(format_probe_table(probe_apis()))
         return EXIT_OK
 
+    if args.run_only:
+        return run_only(args)
+
     print(NOT_IMPLEMENTED_MESSAGE, file=sys.stderr)
     return EXIT_ERROR
+
+
+def run_only(args: argparse.Namespace) -> int:
+    """Run discovery and the runner, print what came back, and stop.
+
+    The developer path behind ``--run-only``: no oracles, no localization, no
+    verdict, so nothing here decides whether a run is clean. Exit 2 means the
+    tool could not get as far as a reference result, which is PLAN.md's rule
+    that a model raising in eager is a tool error.
+    """
+    if args.path is None:
+        print(f"{PROG}: --run-only needs a target path or module", file=sys.stderr)
+        return EXIT_ERROR
+
+    # Before torch is imported anywhere: PLAN.md "Runner semantics", the caches
+    # are disabled by setting the variable before torch does any compiling.
+    if not args.allow_caches:
+        os.environ["TORCHINDUCTOR_FORCE_DISABLE_CACHES"] = "1"
+
+    from compile_check.discover import DiscoveryError, load_target
+    from compile_check.runner import run_all
+
+    backends = [name.strip() for name in args.backends.split(",") if name.strip()]
+    if not backends:
+        print(f"{PROG}: --backends is empty", file=sys.stderr)
+        return EXIT_ERROR
+
+    try:
+        target = load_target(args.path, entry=args.entry, inputs=args.inputs)
+    except DiscoveryError as exc:
+        print(f"{PROG}: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+
+    runset = run_all(
+        target,
+        backends,
+        device=args.device,
+        seed=args.seed,
+        fullgraph=args.fullgraph,
+        dynamic=args.dynamic,
+        disable_caches=not args.allow_caches,
+    )
+    print(format_run_only(runset))
+
+    eager = runset.eager
+    if eager is not None and not eager.ok:
+        return EXIT_ERROR
+    return EXIT_OK
+
+
+def format_run_only(runset: Any) -> str:
+    """Render a :class:`~compile_check.results.RunSet` for the developer path."""
+    env = runset.env
+    lines = [
+        f"target     {runset.target_name}",
+        f"device     {runset.device}   seed {runset.seed}   "
+        f"fullgraph {runset.fullgraph}   dynamic {runset.dynamic}",
+        f"torch      {env.get('torch_version')} on {env.get('machine')}, "
+        f"python {env.get('python_version')}",
+        f"caches     force_disable_caches={env.get('inductor_force_disable_caches')}",
+        "",
+        f"{'backend':<28}{'outputs':>8}{'first call':>13}{'second call':>13}  status",
+    ]
+    for name, result in runset.results.items():
+        status = "ok" if result.ok else f"raised {result.exception.type}"
+        lines.append(
+            f"{name:<28}{len(result.outputs):>8}"
+            f"{_seconds(result.first_call_s):>13}{_seconds(result.second_call_s):>13}  {status}"
+        )
+
+    lines.append("")
+    lines.append("outputs")
+    for name, result in runset.results.items():
+        if not result.outputs:
+            lines.append(f"  {name}: none")
+            continue
+        for index, leaf in enumerate(result.outputs):
+            lines.append(f"  {name}[{index}] {_describe(leaf)}")
+
+    grads = [(name, r) for name, r in runset.results.items() if r.grad_ran]
+    if grads:
+        lines.append("")
+        lines.append("grads")
+        for name, result in grads:
+            recorded = sum(1 for g in result.input_grads if g is not None)
+            lines.append(
+                f"  {name}: {recorded} of {len(result.input_grads)} inputs, "
+                f"{len(result.param_grads)} parameters"
+            )
+
+    failures = [(name, r) for name, r in runset.results.items() if r.exception is not None]
+    if failures:
+        lines.append("")
+        lines.append("exceptions")
+        for name, result in failures:
+            assert result.exception is not None
+            lines.append(f"  {name}: {result.exception.type}: {result.exception.message}")
+            lines.extend(f"    {line}" for line in result.exception.traceback)
+    return "\n".join(lines)
+
+
+def _seconds(value: float | None) -> str:
+    """Format a wall time, or a dash when the call did not happen."""
+    return "-" if value is None else f"{value:.4f}s"
+
+
+def _describe(leaf: Any) -> str:
+    """One-line description of an output leaf, tensor or not."""
+    dtype = getattr(leaf, "dtype", None)
+    shape = getattr(leaf, "shape", None)
+    if dtype is None or shape is None:
+        return f"{type(leaf).__name__} {leaf!r}"
+    return f"{dtype} {tuple(shape)}"
 
 
 if __name__ == "__main__":  # pragma: no cover
