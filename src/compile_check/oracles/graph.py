@@ -474,6 +474,9 @@ def read_baseline(path: str | Path) -> Baseline:
     Unknown keys inside an entry are ignored, so a file written by a later
     version still reads here; a wrong *shape* is not, because a baseline that
     silently parsed as empty would turn every accepted break into a new one.
+    Both named keys are required for the same reason: defaulting a missing one
+    is how a file that lost half an entry becomes the strictest baseline there
+    is without saying so.
 
     Args:
         path: the file named by ``--baseline``.
@@ -482,7 +485,9 @@ def read_baseline(path: str | Path) -> Baseline:
         The parsed baseline, with its path attached for the findings to name.
 
     Raises:
-        BaselineError: the file is missing, is not JSON, or is not this shape.
+        BaselineError: the file is missing, is not JSON, or is not this shape --
+            which :mod:`compile_check.cli` turns into exit code 2 with the
+            message printed as one line.
     """
     location = Path(path)
     try:
@@ -509,15 +514,31 @@ def read_baseline(path: str | Path) -> Baseline:
 
 
 def _entry(location: Path, backend: str, value: Any) -> BaselineEntry:
-    """One backend's entry, checked field by field."""
+    """One backend's entry, checked field by field.
+
+    Both keys are required. They used to default to ``0`` and ``[]``, which
+    turned a truncated or hand-edited entry into the strictest baseline there
+    is -- zero accepted breaks, no accepted reason -- so every break the lane
+    really has came back as a *new* break and failed the job for a reason the
+    message did not mention (M3-1 verifier). A file that cannot be read as a
+    baseline is named as one, with the missing field in the sentence.
+    """
     if not isinstance(value, dict):
         raise BaselineError(
             f"the graph baseline {location} has a {type(value).__name__} for backend "
             f"{backend!r}, expected an object with {BASELINE_COUNT_KEY} and "
             f"{BASELINE_REASONS_KEY}"
         )
-    count = value.get(BASELINE_COUNT_KEY, 0)
-    reasons = value.get(BASELINE_REASONS_KEY, [])
+    missing = [key for key in (BASELINE_COUNT_KEY, BASELINE_REASONS_KEY) if key not in value]
+    if missing:
+        raise BaselineError(
+            f"the graph baseline {location} is missing "
+            f"{' and '.join(repr(key) for key in missing)} for backend {backend!r}; "
+            f"every entry needs {BASELINE_COUNT_KEY} and {BASELINE_REASONS_KEY}, and "
+            "--write-baseline writes both"
+        )
+    count = value[BASELINE_COUNT_KEY]
+    reasons = value[BASELINE_REASONS_KEY]
     # bool is an int in Python and would sail through the check below; a
     # baseline that recorded `true` breaks is a typo, not a count of one.
     if not isinstance(count, int) or isinstance(count, bool) or count < 0:

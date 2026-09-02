@@ -928,6 +928,23 @@ def test_a_malformed_baseline_is_a_tool_error(capsys, tmp_path):
     assert "is not valid JSON" in capsys.readouterr().err
 
 
+def test_a_baseline_entry_missing_a_field_is_a_tool_error_that_names_it(capsys, tmp_path):
+    # The key used to default to 0, which turned a half-written entry into the
+    # strictest baseline there is: every break the lane really has came back as
+    # new, and the message never mentioned the file (M3-1 verifier).
+    path = tmp_path / "baseline.json"
+    path.write_text('{"inductor": {"break_reasons": ["gb0059: Failed to trace"]}}')
+
+    code = main([str(FIXTURES / "graph_break.py"), "--baseline", str(path)])
+    captured = capsys.readouterr()
+
+    assert code == EXIT_ERROR
+    assert "is missing 'graph_break_count' for backend 'inductor'" in captured.err
+    # Reported before the import and before anything compiles, like every other
+    # unreadable baseline.
+    assert captured.out == ""
+
+
 def test_a_baseline_that_cannot_be_written_is_a_tool_error(capsys, tmp_path):
     blocked = tmp_path / "not-a-directory"
     blocked.write_text("")
@@ -1592,6 +1609,29 @@ def test_minimize_does_not_move_the_verdict_or_the_exit_code(capsys):
     assert stage in plain_out
     assert stage in minimized_out
     assert "numerics  (1 fail)" in minimized_out
+
+
+@pytest.mark.parametrize("value", ["-1", "-0.5", "nan"])
+def test_a_budget_that_is_not_a_number_of_seconds_is_a_tool_error(capsys, value):
+    # A negative ceiling used to be read as "already exhausted": the minimizer
+    # quietly did nothing and the report said the case would not shrink. NaN
+    # was the mirror image, since every comparison against it is False and the
+    # ceiling silently disappeared (M3-3 verifier).
+    code = main([str(DIVERGENT), "--minimize", "--budget", value])
+    captured = capsys.readouterr()
+
+    assert code == EXIT_ERROR
+    assert "--budget must be a non-negative number of seconds" in captured.err
+    # Refused before the target is imported and before anything compiles.
+    assert captured.out == ""
+
+
+def test_a_budget_of_zero_is_still_allowed_because_it_means_something(capsys):
+    # Zero is a real answer -- "start no candidate" -- and the pass says so.
+    code = main([str(DIVERGENT), "--backends", f"eager,{PERTURBS}", "--minimize", "--budget", "0"])
+
+    assert code == EXIT_FINDING
+    assert "--budget of 0s ran out" in capsys.readouterr().out
 
 
 def test_a_budget_that_expires_prints_the_partial_marker(capsys):
