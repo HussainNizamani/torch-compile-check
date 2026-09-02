@@ -52,10 +52,39 @@ inputs:
       "GitHub Action").
     required: false
     default: ""
-  budget:
-    description: "Wall-clock ceiling in seconds for the minimizer, forwarded to --budget."
+  write-baseline:
+    description: >-
+      Path to write this run's graph health to, forwarded as
+      --write-baseline. For the one-off job that produces the file you then
+      commit and pass back as `baseline`; the run itself is unaffected and
+      still reports its own verdict.
     required: false
     default: ""
+  minimize:
+    description: >-
+      "true" to pass --minimize, so a finding is shrunk (leading input
+      dimension halved, child modules replaced with a passthrough) before it
+      is reported. Default "false": the pass costs one re-run per candidate,
+      and it is `budget` that bounds it.
+    required: false
+    default: "false"
+  budget:
+    description: >-
+      Wall-clock ceiling in seconds for the minimizer, forwarded to --budget.
+      It bounds what `minimize` starts and nothing else (PLAN.md "GitHub
+      Action"), so without minimize: true it has nothing to bound.
+    required: false
+    default: ""
+  cache:
+    description: >-
+      "true" to let the run reuse compiled artifacts: torch's compile caches
+      stay on (the CLI's --allow-caches, so TORCHINDUCTOR_FORCE_DISABLE_CACHES
+      is not set) and the pip wheel cache is restored and saved with
+      actions/cache, keyed on the torch spec and the Python version. Default
+      "false", which is what makes a run measure the current compiler rather
+      than an artifact an earlier commit left behind.
+    required: false
+    default: "false"
   json-out:
     description: >-
       Path to write the combined JSON results to. Also exposed as the
@@ -119,6 +148,43 @@ runs:
       with:
         python-version: ${{ inputs.python-version }}
 
+    # actions/cache wants a key it can use verbatim, and `torch` is a pip
+    # requirement spec that can carry "==", "<", "!" and spaces. Slug it here
+    # rather than interpolating it raw, so `torch: "torch==2.5.0"` and
+    # `torch: stable` both produce a usable key.
+    - name: Compute the wheel cache key
+      id: cache-key
+      if: inputs.cache == 'true'
+      shell: bash
+      env:
+        TORCH: ${{ inputs.torch }}
+        PYTHON_VERSION: ${{ inputs.python-version }}
+        OS: ${{ runner.os }}
+        ARCH: ${{ runner.arch }}
+      run: |
+        set -euo pipefail
+        slug() { printf '%s' "$1" | tr -c '[:alnum:]._-' '-'; }
+        prefix="compile-check-pip-$(slug "$OS")-$(slug "$ARCH")-py$(slug "$PYTHON_VERSION")-"
+        {
+          echo "prefix=${prefix}"
+          echo "key=${prefix}torch-$(slug "$TORCH")"
+        } >>"$GITHUB_OUTPUT"
+
+    # Only pip's download cache: the wheels, not a virtualenv. torch is the
+    # expensive part of every job here, and re-resolving it against the index
+    # on a hit is cheap next to fetching a 200 MB wheel again. The key carries
+    # the torch spec, so `torch: nightly` -- whose resolved version moves daily
+    # -- keeps hitting the same entry and simply downloads the wheel that is not
+    # in it; the prefix restore-key is what keeps a changed spec partly warm.
+    - name: Restore the pip wheel cache
+      if: inputs.cache == 'true'
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ steps.cache-key.outputs.key }}
+        restore-keys: |
+          ${{ steps.cache-key.outputs.prefix }}
+
     - name: Install torch
       shell: bash
       run: |
@@ -176,33 +242,64 @@ runs:
       id: run
       shell: bash
       # PLAN.md "GitHub Action": disable compile caches by default so a run
-      # measures the current compiler; loop over targets, collect the worst
-      # exit code, write a job summary row per target, and degrade honestly
-      # on a pre-M1-3 ref, where the CLI main path is not implemented yet
-      # (see the allow-unimplemented input; main is past M1-3 already).
+      # measures the current compiler (cache: true opts out); loop over
+      # targets, collect the worst exit code, write a job summary row per
+      # target through summary.sh -- exit code, graph-break count, stage, and
+      # a minimized block under the table when --minimize ran -- and degrade
+      # honestly on a pre-M1-3 ref, where the CLI main path is not implemented
+      # yet (see the allow-unimplemented input; main is past M1-3 already).
       env:
         TARGETS: ${{ inputs.targets }}
         BACKENDS: ${{ inputs.backends }}
         FAIL_ON: ${{ inputs.fail-on }}
         BASELINE: ${{ inputs.baseline }}
+        WRITE_BASELINE: ${{ inputs.write-baseline }}
+        MINIMIZE: ${{ inputs.minimize }}
         BUDGET: ${{ inputs.budget }}
+        CACHE: ${{ inputs.cache }}
         JSON_OUT: ${{ inputs.json-out }}
         EXTRA_ARGS: ${{ inputs.extra-args }}
         ALLOW_UNIMPLEMENTED: ${{ inputs.allow-unimplemented }}
       run: |
         set -uo pipefail
 
+        # The three boolean inputs are compared against the string "true", so
+        # anything else is off. Reject a third value rather than silently
+        # reading it as false: `cache: yes` quietly measuring the wrong thing
+        # for a month is exactly the failure this tool exists to complain about.
+        for pair in "minimize=$MINIMIZE" "cache=$CACHE" "allow-unimplemented=$ALLOW_UNIMPLEMENTED"; do
+          case "${pair#*=}" in
+            true | false) ;;
+            *)
+              echo "::error::input ${pair%%=*} must be \"true\" or \"false\", got \"${pair#*=}\"" >&2
+              exit 2
+              ;;
+          esac
+        done
+
+        # One baseline file cannot hold two targets' graph health: it is keyed
+        # by backend, not by target (docs/action.md "Baseline semantics"). So a
+        # write-baseline run takes exactly one target, instead of letting the
+        # last target silently overwrite what the others wrote.
+        if [ -n "$WRITE_BASELINE" ] \
+          && [ "$(printf '%s\n' "$TARGETS" | grep -c '[^[:space:]]')" -gt 1 ]; then
+          echo "::error::write-baseline takes a single target, since one baseline file is keyed by backend and not by target" >&2
+          exit 2
+        fi
+
         worst=0
-        summary_rows=()
-        json_paths=()
         index=0
         version="$(compile-check --version)"
+        # Collected during the loop and appended after the table: a <details>
+        # block per target that ran the minimizer, which has to come after the
+        # rows rather than between two of them.
+        minimized_sections="$(mktemp)"
 
         {
           echo "## compile-check results ($version)"
           echo
-          echo "| target | exit code | status | stage |"
-          echo "|---|---|---|---|"
+          echo "| target | exit code | status | graph breaks | stage |"
+          echo "|---|---|---|---|---|"
         } >>"$GITHUB_STEP_SUMMARY"
 
         while IFS= read -r target; do
@@ -210,11 +307,20 @@ runs:
           index=$((index + 1))
 
           target_json="${JSON_OUT%.json}.${index}.json"
-          json_paths+=("$target_json")
 
           args=(compile-check "$target" --backends "$BACKENDS" --fail-on "$FAIL_ON" --json "$target_json")
           [ -n "$BASELINE" ] && args+=(--baseline "$BASELINE")
+          [ -n "$WRITE_BASELINE" ] && args+=(--write-baseline "$WRITE_BASELINE")
+          [ "$MINIMIZE" = "true" ] && args+=(--minimize)
+          # --budget bounds --minimize and nothing else (PLAN.md "GitHub
+          # Action"), so passing it without minimize: true gets one line on
+          # stderr from the CLI saying the ceiling had nothing to bound.
           [ -n "$BUDGET" ] && args+=(--budget "$BUDGET")
+          # cache: true means "keep torch's compile caches", which is the CLI's
+          # --allow-caches; the default leaves the CLI to set
+          # TORCHINDUCTOR_FORCE_DISABLE_CACHES=1 so the run measures the current
+          # compiler. The report records which mode was in force.
+          [ "$CACHE" = "true" ] && args+=(--allow-caches)
           # shellcheck disable=SC2206
           [ -n "$EXTRA_ARGS" ] && args+=($EXTRA_ARGS)
 
@@ -247,8 +353,27 @@ runs:
             [ "$code" -gt "$worst" ] && worst=$code
           fi
 
-          echo "| \`$target\` | $row_code | $status | ${stage:--} |" >>"$GITHUB_STEP_SUMMARY"
+          # The row's graph-break cell and the minimized block are read from
+          # the JSON the run just wrote, not from the terminal output: they are
+          # structured fields (backends[].graph.break_count and the top-level
+          # `minimized` object of schema_version 2) and re-parsing prose for
+          # them would be a second, worse copy of the report.
+          bash "$GITHUB_ACTION_PATH/summary.sh" \
+            row "$target" "$row_code" "$status" "${stage:--}" "$target_json" \
+            >>"$GITHUB_STEP_SUMMARY"
+          bash "$GITHUB_ACTION_PATH/summary.sh" \
+            minimized "$target" "$target_json" >>"$minimized_sections"
         done <<<"$TARGETS"
+
+        if [ -s "$minimized_sections" ]; then
+          {
+            echo
+            echo "### Minimized"
+            echo
+            cat "$minimized_sections"
+          } >>"$GITHUB_STEP_SUMMARY"
+        fi
+        rm -f "$minimized_sections"
 
         echo "exit-code=$worst" >>"$GITHUB_OUTPUT"
         echo "json-path=${JSON_OUT}" >>"$GITHUB_OUTPUT"

@@ -61,9 +61,30 @@ The full, current table lives in one place,
 [`docs/action.md`](../docs/action.md#inputs) — copied here would drift the
 moment one of them changes, so this file links rather than duplicates.
 Briefly: `targets` is the only required input; everything else (`backends`,
-`fail-on`, `torch`, `python-version`, `baseline`, `budget`, `json-out`,
-`extra-args`, `ref`, `source`, `allow-unimplemented`) has a default suited to
-a first run. Two outputs, `exit-code` and `json-path`.
+`fail-on`, `torch`, `python-version`, `baseline`, `write-baseline`,
+`minimize`, `budget`, `cache`, `json-out`, `extra-args`, `ref`, `source`,
+`allow-unimplemented`) has a default suited to a first run. Two outputs,
+`exit-code` and `json-path`.
+
+Three of them decide what a run costs and what it means:
+
+- `cache` (default `false`) keeps torch's compile caches **off**, so the run
+  measures the current compiler rather than an artifact an earlier commit left
+  behind. `cache: "true"` turns them on and adds an `actions/cache` step for
+  pip's wheel cache; the JSON report records which mode was in force.
+- `minimize` (default `false`) shrinks a finding before reporting it — leading
+  input dimension halved, child modules replaced with a passthrough — and
+  `budget` is the wall-clock ceiling on that pass, and on nothing else.
+- `write-baseline` is the one-off job that produces the graph-health file you
+  commit and pass back as `baseline`.
+
+## Job summary
+
+One table row per target — exit code, status, the graph oracle's break count,
+and the stage the divergence first appears at — plus a collapsed **Minimized**
+block per target when `minimize` is on, listing what the pass removed and what
+it had to keep. The renderer is [`summary.sh`](summary.sh) beside this file,
+kept out of `action.yml` so it can be run and tested outside a workflow.
 
 ## Installing from source: the `source` input
 
@@ -84,8 +105,8 @@ a green checkmark.
 A `torch.compile` graph break is not, by itself, a wrong answer — failing the
 build on every break would make the action unusable on day one for any real
 model with existing breaks. Pass `baseline` (a path to a stored graph-health
-JSON, written by `--write-baseline` since M3-1) and the graph oracle fails on
-**new** breaks only. The
+JSON, produced by the `write-baseline` input or the CLI's `--write-baseline`)
+and the graph oracle fails on **new** breaks only. The
 correctness categories — numerics, alias, metadata, grad — always fail
 regardless of any baseline; there is no such thing as an acceptable baseline
 of wrong answers. Full detail in
