@@ -15,7 +15,7 @@ accelerator was run.
 | `alias_noop_view_identity.py` | [#191449](https://github.com/pytorch/pytorch/issues/191449) | [#191844](https://github.com/pytorch/pytorch/pull/191844) (merged 2026-09-02T03:45:57Z, commit `a3586f0018`) | merged 2026-09-02 | alias | `inductor` (RED); `aot_eager` did not reproduce on this box | 2.15.0.dev20260831+cpu, aarch64, CPU (default `inductor`) | 2.15.0.dev20260831+cpu, aarch64, CPU (`--backend aot_eager` only) |
 | `dtype_int8_matmul_promotion.py` | [#191308](https://github.com/pytorch/pytorch/issues/191308) | none found | open, unfixed | metadata (dtype) | `inductor` | 2.15.0.dev20260831+cpu, aarch64, CPU (default `inductor`) | 2.15.0.dev20260831+cpu, aarch64, CPU (`--backend aot_eager`) |
 | `distributions_validation_branch.py` | [#194593](https://github.com/pytorch/pytorch/issues/194593) (sibling [#194596](https://github.com/pytorch/pytorch/issues/194596)) | none found | open, unfixed | graph (fullgraph capturability) | not established (both `inductor` and `aot_eager` raised under `fullgraph=True`) | 2.15.0.dev20260831+cpu, aarch64, CPU (`fullgraph=True`, `inductor` and `--backend aot_eager`) | 2.15.0.dev20260831+cpu, aarch64, CPU (default `fullgraph=False` mode, context probe only, not a separate case file) |
-| `numerics_cpu_inductor_miscompile.py` | [#190765](https://github.com/pytorch/pytorch/issues/190765) | none found (issue closed as completed 2026-07-27, no linked fix commit) | closed (completed) | numerics | not run (matched eager on this box; no divergence observed) | not run | 2.15.0.dev20260831+cpu, aarch64, CPU (default `inductor`, and `--backend aot_eager`) |
+| `numerics_cpu_inductor_miscompile.py` | [#190765](https://github.com/pytorch/pytorch/issues/190765) | [#190966](https://github.com/pytorch/pytorch/pull/190966) ("Fixes #190765"; `ModularIndexing` negativity guard) | fixed by #190966 | numerics | not run (matched eager on this box; no divergence observed) | expected on torch <= 2.13.x (pre-fix; not independently re-run here) | 2.15.0.dev20260831+cpu, aarch64, CPU (default `inductor`, and `--backend aot_eager`) -- any build containing #190966 |
 
 ## Notes on surprises (not predicted by the slice brief)
 
@@ -29,10 +29,15 @@ accelerator was run.
   own root-cause diagnosis places the bug in AOTAutograd metadata
   classification (backend-independent). Only `inductor` showed the shape
   corruption on this box.
-- **190765 is GREEN**, consistent with the issue being closed "completed" on
-  2026-07-27, before this torch build's Aug 31 date. No specific fixing
-  commit was identified (`gh issue view` returned no linked PR); the closure
-  is circumstantial evidence of a fix, not confirmation of one.
+- **190765 GREEN is expected, not a surprise.** Fixed upstream by
+  [PR #190966](https://github.com/pytorch/pytorch/pull/190966) ("Fixes
+  #190765"): a negativity guard on `ModularIndexing`'s term-stripping in
+  Inductor's sympy simplification, so the strip is only applied when every
+  surviving term is provably nonnegative. RED expected on any torch build
+  that predates #190966 (e.g. 2.13.x, per the issue's own environment);
+  GREEN expected on any build that contains it, including this one. This
+  entry's "closed, no linked fix commit" framing in an earlier draft was
+  stale -- `gh pr view 190966` links it directly.
 - **194593's contract violation is a `fullgraph=True` graph break
   ("Data-dependent branching", gb0170)**, not literally a `_validate_args`
   divergence as the slice brief speculated. Root cause and the branch line

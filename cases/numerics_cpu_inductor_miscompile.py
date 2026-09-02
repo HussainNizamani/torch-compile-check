@@ -4,8 +4,14 @@ simplest and the most complex members of the same equivalence class both
 compiled correctly.
 
 Issue: https://github.com/pytorch/pytorch/issues/190765 (closed as
-completed 2026-07-27; no linked fix PR was found via `gh issue view`, so the
-closing commit is not identified here)
+completed 2026-07-27)
+Fix PR: https://github.com/pytorch/pytorch/pull/190966 ("Fixes #190765") --
+a negativity guard on `ModularIndexing`'s term-stripping in Inductor's
+sympy simplification layer: the strip that drops additive terms which are
+exact multiples of modulus x divisor is now only applied when every
+surviving term is provably nonnegative, closing the path where an
+always-negative `FloorDiv` term slipped through and produced a negative-base
+`ModularIndexing`, i.e. an out-of-bounds read before the input buffer.
 
 Contract violated: numerics. `((X @ A)^T + (X @ B)^T)^T == X @ A + X @ B ==
 X @ (A + B)` by transpose-distributes-over-addition, double-transpose
@@ -26,15 +32,14 @@ report only exercises `backend="inductor", dynamic=True`. Not independently
 tested against `aot_eager` here.
 
 Known-bad torch versions: the issue reports RED on torch 2.13.0, macOS
-Apple Silicon (arm64). Re-run here on torch 2.15.0.dev20260831+cpu (git
-cbf102a9aec0f6f83466e0584e66d9a96ab613f6), aarch64 Linux, CPU: GREEN --
-compiled output matched eager and was deterministic across 4 repeated
-calls, consistent with the issue being closed as "completed" on
-2026-07-27 (before this torch build's date), i.e. this looks fixed upstream
-by the time of this nightly. No specific fixing commit/PR was identified
-via `gh issue view 190765 --repo pytorch/pytorch`; the issue body alone was
-used to transcribe this repro, verbatim in structure, exactly as the issue's
-"Direct reproducer for the failing intermediate" section.
+Apple Silicon (arm64) -- predates #190966. Re-run here on torch
+2.15.0.dev20260831+cpu (git cbf102a9aec0f6f83466e0584e66d9a96ab613f6),
+aarch64 Linux, CPU: GREEN -- compiled output matched eager and was
+deterministic across 4 repeated calls, expected since this build postdates
+#190966. RED is expected on any torch build that predates that fix; GREEN
+on any build that contains it. The issue body alone was used to transcribe
+this repro, verbatim in structure, exactly as the issue's "Direct
+reproducer for the failing intermediate" section.
 """
 
 import os
