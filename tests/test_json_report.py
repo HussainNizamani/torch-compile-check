@@ -275,9 +275,27 @@ def test_a_document_of_the_wrong_version_is_rejected(runset):
     built = document(runset)
     built["schema_version"] = SCHEMA_VERSION + 1
 
-    assert validate(built) == [
+    problems = validate(built)
+
+    assert len(problems) == 1
+    assert problems[0].startswith(
         f"schema_version is {SCHEMA_VERSION + 1}, this build writes {SCHEMA_VERSION}"
-    ]
+    )
+
+
+def test_a_real_version_one_document_is_rejected_by_its_version_and_not_by_a_missing_key(runset):
+    # M3-3 verifier: a v1 artifact used to be rejected for "minimized is
+    # missing", which is true and useless -- it describes a v1 document as a
+    # damaged v2 one. The version is now checked first and reported alone.
+    built = document(runset)
+    del built["minimized"]
+    built["schema_version"] = 1
+
+    problems = validate(built)
+
+    assert len(problems) == 1
+    assert problems[0].startswith(f"schema_version is 1, this build writes {SCHEMA_VERSION}")
+    assert "minimized" not in problems[0]
 
 
 def test_something_that_is_not_an_object_at_all_is_rejected():
@@ -434,9 +452,12 @@ def test_a_broken_minimized_section_is_reported_field_by_field(runset, mutate, e
     assert expected in validate(built)
 
 
-def test_a_document_without_the_minimized_key_is_a_version_one_document(runset):
-    # What the bump is for: a v1 artifact fed to this build's validator is
-    # rejected by name rather than silently read as a run with no minimizer.
+def test_a_document_that_claims_version_two_without_the_minimized_key_is_rejected(runset):
+    # What the bump is for: `minimized` is not optional in a v2 document, so a
+    # v1 artifact relabelled as v2 -- or a writer that forgot the key -- is
+    # named rather than silently read as a run with no minimizer. A document
+    # that says version 1 honestly is rejected by its version instead, one test
+    # above.
     built = document(runset)
     del built["minimized"]
     assert "minimized is missing" in validate(built)

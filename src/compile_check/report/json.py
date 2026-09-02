@@ -68,7 +68,10 @@ enforces::
 ``minimized`` is version 2's only change, and it is why the version moved:
 ``null`` there means ``--minimize`` was not asked for, and a v1 document has no
 such key at all, so a consumer written against one cannot read the other without
-knowing which it has.
+knowing which it has. A v1 artifact fed to :func:`validate` is therefore
+rejected by its ``schema_version`` and named as version 1 -- not by the missing
+``minimized`` key, which is what the reader would have been told before M4-3 and
+which describes a v1 document as a damaged v2 one.
 
 Two things are deliberately not in it. There is no timestamp: PLAN.md
 "Cross-architecture parity is a feature" makes parity in v1 "running the tool on
@@ -260,6 +263,13 @@ def validate(document: Any) -> list[str]:
     Hand-rolled, and shaped as a list of problems rather than an exception, so
     that a test or a consumer sees every mismatch at once instead of the first.
 
+    The version is checked first and on its own. Every rule below it describes
+    version 2's shape, so a document of another version listed against them
+    reads as a broken v2 document rather than as what it is -- a v1 artifact
+    would have been rejected for a missing ``minimized`` key, which is true and
+    useless. One sentence naming both versions is the answer a consumer of an
+    older artifact needs (M3-3 verifier).
+
     Args:
         document: the parsed JSON, or the mapping :func:`build` returned.
 
@@ -269,6 +279,14 @@ def validate(document: Any) -> list[str]:
     problems: list[str] = []
     if not isinstance(document, dict):
         return [f"the document is a {_name(document)}, expected an object"]
+
+    version = document.get("schema_version")
+    if isinstance(version, int) and not isinstance(version, bool) and version != SCHEMA_VERSION:
+        return [
+            f"schema_version is {version}, this build writes {SCHEMA_VERSION}; "
+            "the rest of this document was not checked, because the fields below "
+            f"are version {SCHEMA_VERSION}'s"
+        ]
 
     _fields(
         problems,
@@ -292,11 +310,6 @@ def validate(document: Any) -> list[str]:
         # Everything below indexes into those keys; reporting "run.device is
         # missing" when `run` itself is a list would be noise on top of noise.
         return problems
-
-    if document["schema_version"] != SCHEMA_VERSION:
-        problems.append(
-            f"schema_version is {document['schema_version']}, this build writes {SCHEMA_VERSION}"
-        )
 
     _fields(problems, "tool.", document["tool"], {"name": (str,), "version": (str,)})
     _fields(
