@@ -34,7 +34,7 @@ against the official repository at its reported commit.
 | Case | Issue | PR | Status upstream | Oracle | First diverging backend | RED on (torch versions run) | GREEN on (torch versions run) |
 |---|---|---|---|---|---|---|---|
 | `alias_slice_scatter_copyback.py` | [#195451](https://github.com/pytorch/pytorch/issues/195451) | [#195484](https://github.com/pytorch/pytorch/pull/195484) (open) | open, unmerged | alias | not established (only `inductor` run; `--backend aot_eager` available but not separately confirmed against this build) | 2.15.0.dev20260901+cpu, aarch64, CPU (clean venv, default `inductor`) | not run |
-| `alias_noop_view_identity.py` | [#191449](https://github.com/pytorch/pytorch/issues/191449) | [#191844](https://github.com/pytorch/pytorch/pull/191844) (merged 2026-09-02T03:45:57Z, commit `a3586f0018`) | merged 2026-09-02 | alias | `inductor` (RED); `aot_eager` did not reproduce | 2.15.0.dev20260901+cpu, aarch64, CPU (clean venv, default `inductor`) -- this build predates the 03:45 UTC merge | 2.15.0.dev20260901+cpu, aarch64, CPU (`--backend aot_eager` only) |
+| `alias_noop_view_identity.py` | [#191449](https://github.com/pytorch/pytorch/issues/191449) | [#191844](https://github.com/pytorch/pytorch/pull/191844) (merged 2026-09-02T03:45:57Z, commit `a3586f0018`) | merged 2026-09-02 | alias | `inductor` (fix location: AOTAutograd -- see note below on why those differ) | 2.15.0.dev20260901+cpu, aarch64, CPU (clean venv, default `inductor`) -- this build predates the 03:45 UTC merge | 2.15.0.dev20260901+cpu, aarch64, CPU (`--backend aot_eager` only) |
 | `dtype_int8_matmul_promotion.py` | [#191308](https://github.com/pytorch/pytorch/issues/191308) | none found | open, unfixed | metadata (dtype) | `inductor` | 2.15.0.dev20260901+cpu, aarch64, CPU (clean venv, default `inductor`) | 2.15.0.dev20260901+cpu, aarch64, CPU (`--backend aot_eager`) |
 | `distributions_validation_branch.py` | [#194593](https://github.com/pytorch/pytorch/issues/194593) (sibling [#194596](https://github.com/pytorch/pytorch/issues/194596)) | none found | open, unfixed | graph (fullgraph capturability) | not established (both `inductor` and `aot_eager` raised under `fullgraph=True`) | 2.15.0.dev20260901+cpu, aarch64, CPU (clean venv, `fullgraph=True`, `inductor` and `--backend aot_eager`) | 2.15.0.dev20260901+cpu, aarch64, CPU (default `fullgraph=False` mode, context probe only, not a separate case file) |
 | `numerics_cpu_inductor_miscompile.py` | [#190765](https://github.com/pytorch/pytorch/issues/190765) | [#190966](https://github.com/pytorch/pytorch/pull/190966) ("Fixes #190765"; `ModularIndexing` negativity guard) | fixed by #190966 | numerics | not run (matched eager; no divergence observed) | expected on torch <= 2.13.x (pre-fix; not independently re-run here) | 2.15.0.dev20260901+cpu, aarch64, CPU (clean venv, default `inductor`, and `--backend aot_eager`) -- confirmed the guard is present in this build's `torch/utils/_sympy/functions.py`, diffed against official source at the same commit: match |
@@ -44,10 +44,19 @@ against the official repository at its reported commit.
 - **195451 IS RED, as the brief expected** -- once run against a clean
   install. See the environment-integrity note above for why an earlier pass
   said GREEN. PR 195484 (the fix) is still open, unmerged.
-- **191449's `aot_eager` backend did not reproduce**, even though the issue's
-  own root-cause diagnosis places the bug in AOTAutograd metadata
-  classification (backend-independent). Only `inductor` showed the shape
-  corruption on this box.
+- **191449: first diverging backend is `inductor`, fix location is
+  AOTAutograd -- confirmed, and these are two different things, not a
+  contradiction.** Re-run on the 0901 nightly: both MWEs (resize-on-view and
+  the two-object identity check) are RED under `inductor`, GREEN under
+  `aot_eager`. The fix (PR 191844) lives entirely in AOTAutograd's
+  `run_functionalized_fw_and_collect_metadata` -- backend-independent code
+  -- yet the symptom is only observable when the backend actually hands
+  back one buffer object for two logical outputs; `aot_eager`'s eager
+  kernels return distinct view objects regardless of AOTAutograd's
+  (mis)classification, so the bug never surfaces there even pre-fix. A
+  stage verdict (which backend diverges) says where the divergence becomes
+  *visible*, never where the bug *lives* -- the general form of this rule is
+  now in PLAN.md's stage-localization section.
 - **190765 GREEN is expected, not a surprise.** Fixed upstream by
   [PR #190966](https://github.com/pytorch/pytorch/pull/190966) ("Fixes
   #190765"): a negativity guard on `ModularIndexing`'s term-stripping in
