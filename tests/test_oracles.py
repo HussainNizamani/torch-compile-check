@@ -690,6 +690,19 @@ def test_a_hand_built_pair_of_results_is_read_the_same_way():
     assert [finding.details["field"] for finding in findings] == ["identity_added"]
 
 
+def test_an_input_with_no_after_snapshot_is_unknown_rather_than_mutated():
+    # A missing snapshot is not evidence of anything, and the one thing it must
+    # not do is read as "mutated": comparing a tensor against a missing entry
+    # would report every input of that lane as written to.
+    eager, other = lanes(independent, independent, (torch.ones(4),))
+    other.inputs_after = []
+    findings = ALIAS.compare(eager, other, CFG)
+
+    assert [finding.severity for finding in findings] == ["info"]
+    assert findings[0].details["field"] == "mutation_unknown"
+    assert findings[0].details["got"] == "input[0] mutation unknown"
+
+
 def test_the_alias_oracle_says_nothing_about_a_lane_that_raised():
     eager, other = lanes(independent, independent, (torch.ones(4),))
     other.exception = CapturedException(type="RuntimeError", message="boom", traceback=())

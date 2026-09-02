@@ -133,11 +133,6 @@ class Mutation:
     after: str = ""
     """The layout on each side, rendered, for the report's detail line."""
 
-    @property
-    def happened(self) -> bool:
-        """Whether this input was mutated in any way the oracle compares."""
-        return bool(self.values_changed) or bool(self.metadata_changed)
-
     def describe(self) -> str:
         """One entry of the mutation set, as the report prints it."""
         if self.values_changed is None:
@@ -629,13 +624,16 @@ def _mutations(torch: Any, result: BackendResult) -> list[Mutation]:
     """
     mutations = []
     for index, before in enumerate(result.inputs_before):
-        after = result.inputs_after[index] if index < len(result.inputs_after) else None
+        # A leaf with no after-snapshot is unknown, not unchanged: comparing it
+        # against a missing entry would report every such input as mutated.
+        recorded = index < len(result.inputs_after)
+        after = result.inputs_after[index] if recorded else None
         meta_before = _meta(result.input_meta_before, index)
         meta_after = _meta(result.input_meta_after, index)
         mutations.append(
             Mutation(
                 label=f"input[{index}]",
-                values_changed=_values_changed(torch, before, after),
+                values_changed=_values_changed(torch, before, after) if recorded else None,
                 metadata_changed=_metadata_changed(meta_before, meta_after),
                 reallocated=(
                     meta_before is not None
