@@ -17,22 +17,34 @@ Oracle: alias (identity / data_ptr comparison after the call, plus a mutate
 side-effect check).
 
 First diverging backend: the issue reports `aot_eager` clean and `inductor`
-diverging on the reporter's setup (a from-source checkout, CPU, unspecified
-arch). Run here with `--backend aot_eager` for comparison, but see the
-Known-bad section below -- on this box, `inductor` did not diverge either,
-so no backend split was observed to confirm against.
+diverging. Run here with `--backend aot_eager` for comparison.
 
-Known-bad torch versions: NOT reproduced (GREEN on both eager-vs-inductor
-and eager-vs-aot_eager) on torch 2.15.0.dev20260831+cpu (git
-cbf102a9aec0f6f83466e0584e66d9a96ab613f6), aarch64, CPU -- run both with the
-case's own default and with `--backend aot_eager`, using the issue's exact
-reproducer (including its `torch.testing.assert_close` pre-conditions)
-outside this file first to rule out a harness bug; the exact same GREEN
-result held. PR 195484 (the fix) is open, unmerged, as of 2026-09-02, so
-this is not an already-fixed case; the working theory is that
-`should_reinplace_scatter()`'s profitability heuristic does not trigger for
-this shape/dtype on aarch64 CPU inductor the way it does on the reporter's
-setup. Not verified on any other arch, dtype, or torch version.
+Known-bad torch versions: RED reproduced on torch 2.15.0.dev20260901+cpu
+(git 279f79e09c3f3ef458061013bda2d2f483c02cae), aarch64, CPU, in a freshly
+installed venv (`pip install --index-url
+https://download.pytorch.org/whl/nightly/cpu torch` into a clean venv,
+nothing else on top). PR 195484 (the fix) was still open, unmerged, as of
+2026-09-02.
+
+An earlier verification pass on this same box, against a torch
+2.15.0.dev20260831+cpu install in a pre-existing venv
+(`/tmp/pruefer_venv`), came back GREEN on this exact case. That was
+environment contamination, not a real result: that venv's
+`torch/_inductor/fx_passes/reinplace.py` had a hand-patched
+`should_reinplace_scatter()` (a `_scatter_result_escapes_graph()` guard)
+that does not exist in the official pytorch/pytorch source at the exact
+commit that venv's own `torch.version.git_version` reported, confirmed by
+diffing the installed file against `gh api
+repos/pytorch/pytorch/contents/...?ref=<that commit>` -- and that guard
+string does not appear anywhere in current pytorch/pytorch main either
+(`gh api search/code` found zero matches). Every other file spot-checked in
+that venv (the files touched by the other four cases' relevant fixes)
+matched official source exactly; only this one file was altered. Re-running
+in a fresh venv, with no other change, reproduces RED and matches the
+issue and the CEO's independent ashburn run on the same build
+(2.15.0.dev20260901+cpu, git 279f79e) bit for bit. Do not reuse
+`/tmp/pruefer_venv` for verification without first diffing its inductor/
+functorch sources against the official repository at its reported commit.
 
 An in-region `.clone()` on the returned value does not protect against this;
 the bug is that the returned *object* aliases the input at the Python level,
