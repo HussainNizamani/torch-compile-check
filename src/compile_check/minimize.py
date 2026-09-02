@@ -272,6 +272,12 @@ class Minimization:
         if not self.reproduced:
             return "nothing was minimized: the finding did not reproduce on a re-run"
         if not self.changed:
+            if self.partial:
+                # The same rule as :func:`_shrink_notes`, in the sentence every
+                # report puts at the top: a pass a ceiling stopped has not
+                # established that anything is load-bearing, and this line is
+                # the one the Action's job summary shows.
+                return f"nothing was reduced: {self.partial_reason}"
             return "nothing could be reduced: every input and every child is load-bearing"
         parts = []
         if self.stubs:
@@ -487,13 +493,27 @@ def shrink_inputs(
         if was != now and was is not None and now is not None
     ]
     new_args, new_kwargs = pytree.tree_unflatten(leaves, spec)
-    return tuple(new_args), dict(new_kwargs), shrinks, _shrink_notes(before, shrinks)
+    return tuple(new_args), dict(new_kwargs), shrinks, _shrink_notes(before, shrinks, budget)
 
 
-def _shrink_notes(before: Sequence[tuple[int, ...] | None], shrinks: Sequence[Shrink]) -> list[str]:
-    """Why nothing shrank, in the words the M3-3 brief asks the report to carry."""
+def _shrink_notes(
+    before: Sequence[tuple[int, ...] | None],
+    shrinks: Sequence[Shrink],
+    budget: Budget,
+) -> list[str]:
+    """Why nothing shrank, in the words the M3-3 brief asks the report to carry.
+
+    The budget is read here and not only reported as ``partial`` because the
+    three sentences below are claims about the *inputs*, and only one of them
+    can be made about a pass that never got to run a candidate. Saying "every
+    input's leading dimension is load-bearing" after ``--budget 0`` stopped the
+    first halving before it started would be the report inventing a measurement
+    (M3-3 verifier).
+    """
     if shrinks:
         return []
+    if budget.stopped is not None:
+        return [f"the inputs were not shrunk: {budget.stopped}"]
     if not any(shape is not None for shape in before):
         return ["no input is a tensor, so there was no dimension to shrink"]
     # `if shape` filters out both a non-tensor leaf (None) and a scalar one
