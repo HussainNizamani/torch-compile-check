@@ -810,6 +810,30 @@ def test_the_fp64_reference_runs_beside_the_backends(mlp_runset):
 
 
 @pytest.fixture(scope="module")
+def aliasing_runset():
+    """A model that really aliases and really mutates, through every lane."""
+    target = load_target(str(FIXTURES / "aliasing.py"))
+    return run_all(target, ["eager", "aot_eager", "inductor"], seed=0)
+
+
+def test_a_model_that_legitimately_aliases_and_mutates_is_not_a_finding(aliasing_runset):
+    eager = aliasing_runset.results["eager"]
+    assert eager.ok, eager.exception
+    for lane in aliasing_runset.others:
+        assert lane.ok, lane.exception
+        assert ALIAS.compare(eager, lane, CFG) == []
+
+    # And the silence is not vacuous: the relation every lane agreed on has two
+    # views of the input in it, an unrelated output, and a mutated input.
+    described = relation(torch, eager).describe()
+    assert "output[0]~input[0] overlapping" in described
+    assert "output[2]~input[0] overlapping" in described
+    assert "output[1]~input[0] overlapping" not in described
+    assert "input[0] mutated (values)" in described
+    assert "input[1] mutated (values)" not in described
+
+
+@pytest.fixture(scope="module")
 def dtype_promotion_runset():
     """The 191308 case through the real backends; inductor costs seconds."""
     target = load_target(str(CASES / "dtype_promotion.py"))
