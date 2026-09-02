@@ -20,7 +20,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-__all__ = ["BackendResult", "CapturedException", "RunSet", "TensorMeta"]
+__all__ = [
+    "BackendResult",
+    "CapturedException",
+    "GraphBreak",
+    "GraphHealth",
+    "RunSet",
+    "TensorMeta",
+]
 
 # PLAN.md M1-1 brief: an exception is recorded with its first 20 traceback lines,
 # enough to name the failing frame without pasting a whole inductor stack into a
@@ -75,6 +82,120 @@ class TensorMeta:
 
     storage_ptr: int
     """``untyped_storage().data_ptr()``: which buffer the tensor lives in."""
+
+
+@dataclass(frozen=True)
+class GraphBreak:
+    """One place Dynamo gave up and fell back to the interpreter.
+
+    PLAN.md "graph": graph breaks are not bugs, they explain why a user is not
+    getting the speedup they expect. What makes one actionable is the pair below
+    -- why Dynamo stopped, and which line of the user's own code it stopped at
+    -- so both are recorded and neither is derived from the other.
+    """
+
+    reason: str
+    """Dynamo's own explanation, verbatim and usually a dozen lines.
+
+    Kept whole rather than trimmed here: the hints under the first line are what
+    a user acts on, the Markdown report of M3-2 wants them, and the graph oracle
+    is where the one-line identity a baseline compares on is derived from.
+    """
+
+    user_frame: str | None
+    """``file:line in function`` of the last user frame under the break.
+
+    The *last* frame, which is the one closest to the break: the head of the
+    stack is whatever entry point the model was called through and is the same
+    for every break in a run. ``None`` when Dynamo recorded no user stack.
+    """
+
+
+@dataclass(frozen=True)
+class GraphHealth:
+    """What one compiled lane's graphs looked like (PLAN.md "graph").
+
+    Filled by :func:`compile_check.runner.run_backend` from
+    ``torch._dynamo.explain`` and from ``counters['stats']['unique_graphs']``
+    sampled around the repeat call, and read by the graph oracle. Not recorded
+    for ``eager`` or ``eager_fp64``: neither is compiled, so neither has graphs.
+    """
+
+    graph_count: int = 0
+    """How many graphs Dynamo produced. ``0`` means it captured nothing at all."""
+
+    break_count: int = 0
+    """``ExplainOutput.graph_break_count``, floored at zero and at :attr:`breaks`.
+
+    torch computes it as ``graph_count - 1``, which is right in the middle and
+    wrong at both ends: a callable Dynamo captured no graph for comes back as
+    ``-1``, and a break whose resumption produced no second graph comes back one
+    lower than the number of reasons recorded. The floors are applied once, in
+    :func:`compile_check.runner._graph_health`, so that a negative count cannot
+    read as an improvement against a baseline and a break with a reason is never
+    counted as no break at all.
+    """
+
+    breaks: tuple[GraphBreak, ...] = ()
+    """One entry per reason ``explain`` reported, in the order it reported them.
+
+    May be shorter than :attr:`break_count`: the count is torch's arithmetic
+    over the graphs and the reasons are what the tracer managed to record. Never
+    longer, because of the floor above.
+    """
+
+    op_count: int = 0
+    """How many operators ended up in the captured graphs."""
+
+    compile_times: str | None = None
+    """``torch._dynamo.utils.compile_times(repr="str")`` as ``explain`` returned it.
+
+    Process-cumulative rather than per lane -- torch accumulates it and
+    ``reset()`` does not clear it -- so it is context for a report to print and
+    never a number this tool subtracts. The per-lane wall time is
+    :attr:`BackendResult.first_call_s`, measured around the first compiled call.
+    """
+
+    unique_graphs_before: int | None = None
+    """``counters['stats']['unique_graphs']`` read just before the repeat call."""
+
+    unique_graphs_after: int | None = None
+    """The same counter just after it. ``None`` on either side means the counter
+    could not be read, which is not the same as a counter that did not move."""
+
+    explain_error: CapturedException | None = None
+    """Set when the ``explain`` pass itself raised.
+
+    A target that raises raises under ``explain`` too, and a lane whose graph
+    health could not be measured must not read as a lane with no graph breaks.
+    """
+
+    @property
+    def measured(self) -> bool:
+        """Whether the ``explain`` pass produced counts at all."""
+        return self.explain_error is None
+
+    @property
+    def recompiled(self) -> bool:
+        """Whether the repeat call with identical inputs compiled a new graph.
+
+        PLAN.md "graph": the counter incrementing on a second call with
+        identical inputs means the model recompiled when it should not have. An
+        unreadable counter answers ``False``, because "not known" must not be
+        reported as "it happened".
+        """
+        before, after = self.unique_graphs_before, self.unique_graphs_after
+        if before is None or after is None:
+            return False
+        return after > before
+
+    @property
+    def recompiles(self) -> int:
+        """How many graphs the repeat call added, or ``0`` when it added none."""
+        before, after = self.unique_graphs_before, self.unique_graphs_after
+        if before is None or after is None:
+            return 0
+        return max(0, after - before)
 
 
 @dataclass
@@ -186,6 +307,15 @@ class BackendResult:
     grad_error: CapturedException | None = None
     """Set when the forward succeeded and the backward raised."""
 
+    graph_health: GraphHealth | None = None
+    """What ``torch._dynamo.explain`` and the recompile counter said, or ``None``.
+
+    ``None`` for a lane that was never compiled -- ``eager``, ``eager_fp64`` --
+    and for a hand-built record. The graph oracle reads it, and treats ``None``
+    as "not measured" rather than as "no graph breaks", which are the two
+    answers a report must never let read alike.
+    """
+
     @property
     def ok(self) -> bool:
         """Whether the forward pass completed."""
@@ -248,6 +378,25 @@ class RunSet:
     leak from one lane into the next; with the flag on, it can, and a numerics
     finding may be the harness's doing. A report that did not say which mode
     produced it would leave that ambiguous.
+    """
+
+    target_is_module: bool = True
+    """Whether the target was an ``nn.Module`` at all.
+
+    A plain callable has no parameters or buffers to isolate, so the deep copy
+    :attr:`share_module` switches off never applied to it in the first place.
+    Recorded so the report can say that instead of claiming a copy that never
+    happened.
+    """
+
+    module_copy_error: str | None = None
+    """Why the per-lane deep copy did not happen, when it was meant to.
+
+    ``<ExceptionType>: <message>`` for a module that refused ``copy.deepcopy``,
+    which leaves every lane sharing one object exactly as ``--share-module``
+    does. Until M3-1 that fallback was a warning in the log while the report's
+    environment block still said "deep copied per lane"; a run whose lanes may
+    have leaked state into each other has to say so where the evidence is read.
     """
 
     results: dict[str, BackendResult] = field(default_factory=dict)
