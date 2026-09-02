@@ -476,7 +476,12 @@ def _graph_body(repro: repro_source.Repro, finding: Finding, lane: str) -> list[
     return [
         f"# {_one_line(finding.message)}",
         f"explained = torch._dynamo.explain({entry}){call}",
-        "self.assertEqual(explained.graph_break_count, 0)",
+        # torch's own graph_break_count is unreliable (runner.py floors it with
+        # len(break_reasons): a data-dependent branch can come back
+        # graph_break_count 0 with a break reason recorded), so the reasons
+        # list is asserted directly and the count is checked against the floor.
+        "self.assertEqual(list(explained.break_reasons), [])",
+        "self.assertEqual(max(explained.graph_break_count, len(explained.break_reasons)), 0)",
     ]
 
 
