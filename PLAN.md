@@ -142,7 +142,8 @@ compile-check path/to/file.py [options]
 | `--seed` | RNG seed, default fixed |
 | `--allow-caches` | do not set `TORCHINDUCTOR_FORCE_DISABLE_CACHES=1` |
 | `--fp64-oracle` | add an fp64 eager reference run to the numerics oracle, see the blind spot section |
-| `--budget SECONDS` | wall-clock ceiling for the whole run, for CI use |
+| `--minimize` | after a finding, shrink the case while it still reproduces: halve the leading input dimension and replace child modules with a passthrough, then report what is left (M3-3) |
+| `--budget SECONDS` | wall-clock ceiling for the minimizer, for CI use; v1 bounds what `--minimize` starts, since a compile that has begun cannot be interrupted without killing the process |
 | `--baseline FILE` | a stored graph-health baseline, so the graph oracle fails on new breaks rather than on any break |
 | `--no-grad` | skip the backward pass and the grad oracle for this run |
 | `--max-findings N` | cap the findings printed per oracle group; hidden ones are counted (N >= 0) |
@@ -426,6 +427,12 @@ A `budget` input caps wall-clock time and passes through to `--budget`. Compilat
 slow and matrix jobs multiply; a check that occasionally takes forty minutes gets
 deleted from CI. On timeout the action reports what it finished and exits with a
 distinct status rather than a false clean.
+
+Scope of `--budget` as built in M3-3, because the paragraph above reads wider than
+what ships: it bounds the *minimizer*, which is the part of a run that decides for
+itself how much work to do. A `torch.compile` call that has started cannot be
+interrupted without killing the process, so bounding the run itself is the job's own
+`timeout-minutes` and not a flag of ours.
 
 ## Regression corpus
 

@@ -3,14 +3,14 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 <!-- badge placeholders: CI, PyPI, and the torch matrix land with M4 -->
 
-> **Status: M3 in progress, the tool runs end to end with all five oracles.**
+> **Status: M3 complete, the tool runs end to end with all five oracles.**
 > Point it at a model and it runs eager, `aot_eager`, and `inductor`, compares
 > the numerics, the aliasing and mutation behaviour, the output metadata, the
 > gradients, and the graph health, names the compilation stage a divergence
 > first appears in, prints a report, and writes the JSON, Markdown, and
-> regression-test artifacts. The minimizer (M3-3) is still a stub, so a repro is
-> the target's own source rather than a shrunk one; the report says which checks
-> did not run, so a missing feature never reads as a passing one.
+> regression-test artifacts. `--minimize` then shrinks the case while it still
+> reproduces. The report says which checks did not run, so a missing feature
+> never reads as a passing one.
 
 Bring your own model; compile-check tells you whether `torch.compile` changed its
 answers, and if so hands you a minimal repro and a ready-to-file report. The tool is a
@@ -61,7 +61,7 @@ Three artifacts come off the same run:
 $ compile-check cases/dtype_promotion.py --json out.json --md draft.md --emit-test test_case.py
 ```
 
-`--json` writes the versioned, CI-consumable result — schema version 1, with the
+`--json` writes the versioned, CI-consumable result — schema version 2, with the
 environment block, the run configuration, one record per lane and per finding, and
 the verdict. It is the unit of cross-architecture comparison: run the tool on ARM
 and on x86 and diff the two files (a first-class `compile-check compare` is v0.2).
@@ -71,6 +71,24 @@ the tool drafts, and a person reads it, edits it, and files it. `--emit-test` wr
 the top finding as a regression test in the inductor suite's eager-versus-compiled
 idiom, asserting the property the oracle failed on. A clean run writes no test and
 says so, because a regression test that asserts nothing is worse than no file.
+
+## Shrink the case
+
+```console
+$ compile-check cases/alias_copyback.py --minimize --budget 60
+```
+
+After a finding, `--minimize` re-runs the two lanes that matter — eager and the one
+that diverged — against smaller and smaller versions of the case, keeping every
+change the finding survives. It halves the leading dimension of the inputs down to
+one, and replaces child modules with `torch.nn.Identity()` one at a time, so what is
+left is the part of your model the bug actually needs. Children it could not replace
+are listed with the reason, `--budget SECONDS` bounds the pass and a run that hits
+the ceiling is reported as *partial* rather than as minimal, and the report ends with
+the exact environment variables for torch's own accuracy minifier
+(`TORCHDYNAMO_REPRO_AFTER=aot TORCHDYNAMO_REPRO_LEVEL=4`), which the tool hands over
+rather than runs. The Markdown draft and the emitted regression test are written from
+the minimized case when there is one.
 
 The plan, including the full oracle design and the milestone schedule, is in
 [PLAN.md](PLAN.md).

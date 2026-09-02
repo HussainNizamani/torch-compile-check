@@ -71,7 +71,7 @@ fixed version:
 | `torch` | `stable` | `stable` (PyPI), `nightly` (CPU nightly index), or an explicit pip spec such as `torch==2.5.0`. |
 | `python-version` | `3.12` | Passed to `actions/setup-python`. |
 | `baseline` | *(unset)* | Path to a stored graph-health baseline JSON, forwarded as `--baseline`. When set, the graph oracle fails on **new** breaks only rather than every break — see "Baseline semantics" below. |
-| `budget` | *(unset)* | Wall-clock ceiling in seconds, forwarded to `--budget`. |
+| `budget` | *(unset)* | Wall-clock ceiling in seconds for the minimizer, forwarded to `--budget`. It bounds `--minimize` only; see [Runtime budget](#runtime-budget). |
 | `json-out` | `compile-check-results.json` | Base path for the JSON results. With more than one target, each run writes its own file suffixed `.<n>.json` next to this base (`compile-check-results.1.json`, `.2.json`, ...), since one CLI invocation produces one JSON document per PLAN.md "Reports". |
 | `extra-args` | *(unset)* | Extra arguments appended verbatim to every invocation, for flags this action does not wrap directly (`--rtol`, `--seed`, `--fullgraph`, ...). |
 | `ref` | `main` | Git ref of `HussainNizamani/compile-check` to install from, until the package ships on PyPI. |
@@ -132,9 +132,21 @@ records which mode was used.
 
 ## Runtime budget
 
-Compilation is slow, and a matrix multiplies it. Set `budget` to cap the
-wall-clock time per target; on a timeout, the action reports what it finished
-rather than claiming a false clean.
+Compilation is slow, and a matrix multiplies it. `budget` caps the wall-clock
+time the *minimizer* spends per target, and nothing else: it is passed to
+`--budget`, which bounds what `--minimize` starts. A pass that runs out reports
+a partial reduction rather than claiming a smallest case, and the run's verdict
+and exit code are unaffected.
+
+It is deliberately not a ceiling on the run. A `torch.compile` call that has
+started cannot be interrupted without killing the process, so a flag that
+claimed to bound the whole run would either be a lie or a `SIGKILL` with no
+report at all. Use the job's own `timeout-minutes` for that, and keep the
+target small.
+
+The action does not pass `--minimize` yet (that input lands with M4), so a
+workflow that sets `budget` today gets one line on stderr saying the ceiling had
+nothing to bound. Add `--minimize` through `extra-args` to turn it on.
 
 ## Degrading honestly on a pre-M1-3 `ref`
 
