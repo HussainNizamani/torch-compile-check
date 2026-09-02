@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -39,6 +40,15 @@ def mlp_runset():
 def test_the_cache_variable_was_set_before_torch_was_imported():
     assert os.environ[CACHE_ENV_VAR] == "1"
     assert torch._inductor.config.force_disable_caches is True
+
+
+def test_the_session_writes_its_generated_code_somewhere_of_its_own():
+    # M1-1 review carry-over (b): disabling the caches stops inductor reading an
+    # artifact, not writing one, and the default directory is never cleaned up.
+    cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
+    assert cache_dir, "conftest.py must point the codegen output at its own directory"
+    assert Path(cache_dir).is_dir()
+    assert Path(cache_dir) != Path(tempfile.gettempdir())
 
 
 def test_runset_shape(mlp_runset):

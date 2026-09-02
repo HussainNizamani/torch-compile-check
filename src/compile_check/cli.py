@@ -51,9 +51,20 @@ NOT_IMPLEMENTED_MESSAGE = (
 _EPILOG = """\
 exit codes:
   0  clean
-  1  at least one finding in a --fail-on category
+  1  at least one fail-severity finding in a --fail-on category, or a compiled
+     backend that raised while eager did not
   2  tool error (import failure, discovery failure, backend unavailable,
      model raised in eager)
+
+environment:
+  TORCHINDUCTOR_FORCE_DISABLE_CACHES
+     set to 1 by this tool before torch is imported, unless --allow-caches was
+     passed; a run must measure the current compiler, not an artifact an earlier
+     run cached
+  TORCHINDUCTOR_CACHE_DIR
+     where inductor writes the code it generates. Disabling the caches stops
+     torch reading that directory, not writing to it, and nothing prunes it;
+     point this at a scratch directory if disk is tight
 """
 
 
@@ -166,7 +177,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--allow-caches",
         action="store_true",
-        help="do not set TORCHINDUCTOR_FORCE_DISABLE_CACHES=1",
+        help=(
+            "do not set TORCHINDUCTOR_FORCE_DISABLE_CACHES=1; the run gets faster "
+            "and starts measuring whatever an earlier run cached, so the report "
+            "records which mode was in force"
+        ),
     )
     parser.add_argument(
         "--fp64-oracle",
