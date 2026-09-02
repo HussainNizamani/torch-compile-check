@@ -475,6 +475,44 @@ def test_the_tool_reports_the_copyback_alias_case_end_to_end(capsys):
     assert "first diverges at inductor, which implicates inductor lowering/codegen" in out
 
 
+def test_a_backend_that_really_raised_exits_one_whatever_fail_on_says(capsys):
+    # The live half of the rule the test above this one reaches by monkeypatch:
+    # a compiled lane that raises while eager does not is exit 1 regardless of
+    # --fail-on. The fixture registers a torch.compile backend that raises, so
+    # the failure is real and does not depend on an op that happens to be broken
+    # on some torch. Importing it here is what puts the name in the registry
+    # before the CLI validates --backends.
+    from compile_check.discover import import_target_module
+
+    fixture = FIXTURES / "compile_only_raises.py"
+    backend = import_target_module(str(fixture)).BACKEND
+    code = main(
+        [
+            str(fixture),
+            "--backends",
+            f"eager,{backend}",
+            # Not one of the categories a finding could fall into: the exit code
+            # below is the exception rule, not an oracle's.
+            "--fail-on",
+            "graph",
+            "--color",
+            "never",
+        ]
+    )
+    out = capsys.readouterr().out
+
+    assert code == EXIT_FINDING
+    assert "raised BackendCompilerFailed" in out
+    assert "this backend raises on purpose" not in out  # the report names the type, not the stack
+    # The eager lane is healthy, so this is a compile-only failure and not a
+    # broken model, which would have been exit 2.
+    assert "eager " in out
+    assert "the model raised" not in out
+    assert f"first diverges at {backend}" in out
+    # No oracle ran against a lane that produced nothing.
+    assert "findings\n  none" in out
+
+
 def test_the_main_path_reports_a_broken_model_as_the_model_and_exits_two(capsys):
     code = main([str(FIXTURES / "raises.py"), "--backends", "eager,aot_eager", "--color", "never"])
     captured = capsys.readouterr()
