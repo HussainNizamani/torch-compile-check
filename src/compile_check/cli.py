@@ -183,6 +183,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.probe:
+        # --probe is a diagnostic that prints a table and exits; it produces no
+        # run, so it has nothing to write to the report files. Silently dropping
+        # them looked like a failed write, so say so.
+        for flag, value in (("--json", args.json), ("--md", args.md)):
+            if value is not None:
+                print(f"{PROG}: {flag} ignored with --probe", file=sys.stderr)
         print(format_probe_table(probe_apis()))
         return EXIT_OK
 

@@ -43,6 +43,13 @@ dev = [
   "ruff>=0.6",
   "mypy>=1.11",
   "pre-commit>=3.7",
+  # Not a runtime dependency: PLAN.md "Engineering decisions" keeps numpy
+  # optional. It is in the dev extra because torch warns "Failed to initialize
+  # NumPy" on every import without it, which pollutes the output of every test
+  # and every hand run, and because the runner seeds numpy's generator when it
+  # is present (PLAN.md "Runner semantics"), a path that is only exercised in
+  # CI if numpy is installed there.
+  "numpy",
 ]
 
 [project.scripts]

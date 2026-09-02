@@ -68,6 +68,19 @@ def test_probe_exits_zero_and_prints_one_row_per_api(capsys):
         assert line.split()[-1] in {"present", "absent"}
 
 
+@pytest.mark.parametrize("flag", ["--json", "--md"])
+def test_probe_warns_that_report_flags_are_ignored(capsys, flag):
+    assert main(["--probe", flag, "out"]) == EXIT_OK
+    captured = capsys.readouterr()
+    assert captured.err.strip() == f"compile-check: {flag} ignored with --probe"
+    assert captured.out.startswith("api")
+
+
+def test_probe_alone_warns_about_nothing(capsys):
+    assert main(["--probe"]) == EXIT_OK
+    assert capsys.readouterr().err == ""
+
+
 def test_format_probe_table_two_columns():
     table = format_probe_table({"torch.compile": True, "torch.nope": False})
     assert table.splitlines()[2:] == [
