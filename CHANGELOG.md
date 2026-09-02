@@ -35,6 +35,18 @@ All notable changes to this project are documented here. The format follows
   `--no-grad` switches the backward pass off.
 - `BackendResult.second_call_exception`, so a lane that answers once and then
   raises is recorded rather than only logged.
+- The alias and mutation oracle: object identity, untyped storage identity, and
+  byte-range overlap over every output-output and output-input pair, plus the
+  set of inputs the call mutated in its values or in its layout. The compiled
+  relation must equal the eager one entry for entry; an added alias is the
+  195451 shape and an identity collapse the 191449 one. Storage sharing without
+  overlap and `torch._debug_has_internal_overlap` are recorded as context and
+  never fail a run.
+- `BackendResult.input_meta_before` / `input_meta_after`: shape, stride, dtype,
+  storage offset, and the two addresses per input leaf, so a `resize_` can be
+  told from a `copy_`, which two clones cannot say.
+- `cases/alias_copyback.py`: 195451 written to the discovery convention, so
+  `compile-check cases/alias_copyback.py` runs it through the tool.
 - Tooling: ruff lint and format, mypy strict over `src/`, pytest, pre-commit, a
   `Makefile`, and a GitHub Actions matrix over Python 3.10 to 3.13 and torch
   stable and nightly on CPU.

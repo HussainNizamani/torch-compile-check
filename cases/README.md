@@ -15,5 +15,6 @@ Two shapes of file live here, and the difference is deliberate.
 - **compile-check targets**, following the discovery convention of PLAN.md: a
   module-level `model` or `fn` plus `inputs` or `get_inputs()`, and nothing
   else, so `compile-check cases/<file>.py` runs the case through the tool
-  itself. `dtype_promotion.py` is the first, and it is the discovery-convention
-  twin of `dtype_int8_matmul_promotion.py`.
+  itself. `dtype_promotion.py` is the discovery-convention twin of
+  `dtype_int8_matmul_promotion.py`, and `alias_copyback.py` the twin of
+  `alias_slice_scatter_copyback.py`.
