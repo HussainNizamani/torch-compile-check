@@ -1,4 +1,4 @@
-"""Tests for the numerics and metadata oracles.
+"""Tests for the four oracles: numerics, alias, metadata, and grad.
 
 Most of these are hand-built tensor pairs rather than runs: an oracle's rules
 are exactly what has to be pinned down, and a pair built here says what it is
@@ -30,6 +30,7 @@ from compile_check.oracles import (
     run_oracles,
 )
 from compile_check.oracles.alias import AliasOracle, relation
+from compile_check.oracles.grad import GradOracle
 from compile_check.oracles.metadata import MetadataOracle
 from compile_check.oracles.numerics import FALLBACK_TOLERANCES, NumericsOracle, resolve_tolerances
 from compile_check.results import BackendResult, CapturedException
@@ -42,6 +43,7 @@ CASES = REPO_ROOT / "cases"
 NUMERICS = NumericsOracle()
 ALIAS = AliasOracle()
 METADATA = MetadataOracle()
+GRAD = GradOracle()
 CFG = OracleConfig()
 
 
@@ -777,13 +779,154 @@ def test_a_relation_where_everything_is_related_is_compared_in_under_a_second():
 
 
 # --------------------------------------------------------------------------
+# grad: the presence set, the values, and the backward that raised
+# --------------------------------------------------------------------------
+
+
+def grad_lane(backend: str, grads: dict[str, Any], **kwargs: Any) -> BackendResult:
+    """A lane carrying one parameter gradient per name, and nothing else.
+
+    Enough for the grad oracle: it reads the two gradient records and the
+    backward's exception, and the forward's outputs only through ``ok``.
+    """
+    kwargs.setdefault("grad_ran", True)
+    return BackendResult(backend=backend, param_grads=dict(grads), **kwargs)
+
+
+def grad_pair(expected: dict[str, Any], got: dict[str, Any]) -> tuple[BackendResult, BackendResult]:
+    """An eager lane and an inductor lane, each with its own gradients."""
+    return grad_lane("eager", expected), grad_lane("inductor", got)
+
+
+def test_the_same_gradients_in_both_lanes_are_silent():
+    grads = {"w": torch.ones(2, 3), "b": torch.zeros(3)}
+    assert GRAD.compare(*grad_pair(grads, {k: v.clone() for k, v in grads.items()}), CFG) == []
+
+
+def test_a_gradient_only_eager_produced_is_a_fail_naming_the_parameter():
+    expected = {"w": torch.ones(3), "b": torch.ones(2)}
+    findings = GRAD.compare(*grad_pair(expected, {"w": torch.ones(3)}), CFG)
+
+    assert [finding.severity for finding in findings] == ["fail"]
+    finding = findings[0]
+    assert finding.oracle == "grad"
+    assert finding.backend == "inductor"
+    # A gradient belongs to a parameter, not to an output leaf.
+    assert finding.output_index is None
+    assert finding.details["field"] == "grad_missing"
+    assert finding.details["tensor"] == "parameter b"
+    assert "eager produced a gradient for parameter b and inductor did not" in finding.message
+
+
+def test_a_gradient_only_the_compiled_lane_produced_is_a_fail():
+    got = {"w": torch.ones(3), "b": torch.ones(2)}
+    findings = GRAD.compare(*grad_pair({"w": torch.ones(3)}, got), CFG)
+
+    assert [finding.details["field"] for finding in findings] == ["grad_extra"]
+    assert "inductor produced a gradient for parameter b and eager did not" in findings[0].message
+
+
+def test_a_perturbed_gradient_is_a_fail_naming_the_parameter():
+    expected = {"w": torch.ones(4), "b": torch.ones(2)}
+    got = {"w": torch.ones(4), "b": torch.ones(2) + 0.5}
+    findings = GRAD.compare(*grad_pair(expected, got), CFG)
+
+    assert [finding.severity for finding in findings] == ["fail"]
+    finding = findings[0]
+    assert finding.details["field"] == "grad_values"
+    assert finding.details["tensor"] == "parameter b"
+    assert finding.message.startswith("the gradient of parameter b differs: ")
+    # The message is assert_close's, because the rule is the numerics rule.
+    assert "Mismatched elements: 2 / 2" in finding.message
+    assert finding.details["rtol"] == pytest.approx(1.3e-6)
+
+
+def test_gradients_go_through_the_numerics_tolerances():
+    # PLAN.md "grad": the values go through the numerics comparison, which means
+    # the per-dtype tolerance and the --rtol/--atol overrides both apply here.
+    expected = {"w": torch.ones(8)}
+    within = {"w": torch.ones(8) + 5e-7}
+    assert GRAD.compare(*grad_pair(expected, within), CFG) == []
+
+    beyond = {"w": torch.ones(8) + 0.5}
+    assert len(GRAD.compare(*grad_pair(expected, beyond), CFG)) == 1
+    assert GRAD.compare(*grad_pair(expected, beyond), OracleConfig(atol=1.0)) == []
+
+
+def test_a_backward_that_raised_in_one_lane_only_is_a_fail():
+    boom = CapturedException(type="RuntimeError", message="no backward here", traceback=("a", "b"))
+    eager = grad_lane("eager", {"w": torch.ones(3)})
+    other = grad_lane("inductor", {}, grad_ran=False, grad_error=boom)
+
+    findings = GRAD.compare(eager, other, CFG)
+
+    assert [finding.details["field"] for finding in findings] == ["grad_error_added"]
+    assert findings[0].severity == "fail"
+    assert "raised RuntimeError under inductor and completed under eager" in findings[0].message
+    assert findings[0].details["expected"] == "completed"
+    assert findings[0].details["got"] == "RuntimeError"
+    # And nothing else: a lane whose backward did not finish has no gradients
+    # for a reason already stated, and listing every missing one would bury it.
+    assert len(findings) == 1
+
+
+def test_a_backward_that_raised_in_eager_only_is_a_fail_the_other_way():
+    boom = CapturedException(type="ValueError", message="not differentiable", traceback=())
+    eager = grad_lane("eager", {}, grad_ran=False, grad_error=boom)
+    other = grad_lane("inductor", {"w": torch.ones(3)})
+
+    findings = GRAD.compare(eager, other, CFG)
+
+    assert [finding.details["field"] for finding in findings] == ["grad_error_dropped"]
+    assert "raised ValueError under eager and completed under inductor" in findings[0].message
+
+
+def test_both_backwards_raising_is_not_a_divergence():
+    boom = CapturedException(type="RuntimeError", message="no backward here", traceback=())
+    eager = grad_lane("eager", {}, grad_ran=False, grad_error=boom)
+    other = grad_lane("inductor", {}, grad_ran=False, grad_error=boom)
+
+    assert GRAD.compare(eager, other, CFG) == []
+
+
+def test_no_grad_reports_an_info_line_rather_than_a_clean_row():
+    grads = {"w": torch.ones(3)}
+    findings = GRAD.compare(*grad_pair(grads, grads), OracleConfig(grad=False))
+
+    assert [finding.severity for finding in findings] == ["info"]
+    assert findings[0].details["field"] == "grad_disabled"
+    assert "--no-grad switched the backward pass off" in findings[0].message
+
+
+def test_the_grad_oracle_says_nothing_about_a_lane_that_raised():
+    eager = grad_lane("eager", {"w": torch.ones(3)})
+    other = grad_lane("inductor", {})
+    other.exception = CapturedException(type="RuntimeError", message="boom", traceback=())
+
+    assert GRAD.compare(eager, other, CFG) == []
+
+
+def test_the_grad_oracle_leaves_the_output_requires_grad_flag_to_metadata():
+    # PLAN.md "grad" and "metadata" divide this deliberately: reporting one
+    # divergence from two oracles hides which one is the real defect.
+    values = torch.ones(3)
+    eager = lane("eager", [values], output_requires_grad=[True])
+    other = lane("inductor", [values.clone()], output_requires_grad=[False])
+
+    assert GRAD.compare(eager, other, CFG) == []
+    assert [finding.details["field"] for finding in METADATA.compare(eager, other, CFG)] == [
+        "requires_grad"
+    ]
+
+
+# --------------------------------------------------------------------------
 # the registry
 # --------------------------------------------------------------------------
 
 
 def test_the_registry_is_a_subset_of_the_fail_on_vocabulary():
     assert set(ORACLES) <= set(ORACLE_NAMES)
-    assert list(ORACLES) == ["numerics", "alias", "metadata"]
+    assert list(ORACLES) == ["numerics", "alias", "metadata", "grad"]
     for name, oracle in ORACLES.items():
         assert isinstance(oracle, Oracle)
         assert oracle.name == name
@@ -820,6 +963,92 @@ def test_a_clean_model_produces_no_fail_findings(mlp_runset):
         OracleConfig(fp64=True, fp64_reference=mlp_runset.fp64),
     )
     assert [finding for finding in findings if finding.severity == "fail"] == []
+
+
+def test_the_grad_oracle_is_silent_on_a_clean_model(mlp_runset):
+    eager, inductor = mlp_runset.results["eager"], mlp_runset.results["inductor"]
+    assert GRAD.compare(eager, inductor, CFG) == []
+    # And the silence is not vacuous: four parameters really were differentiated
+    # in both lanes, and the oracle really compared their gradients.
+    assert eager.grad_ran is True
+    assert inductor.grad_ran is True
+    assert len(eager.grad_present) == 4
+    assert eager.grad_present == inductor.grad_present
+
+
+def test_a_perturbed_parameter_gradient_from_a_real_run_names_the_parameter(mlp_runset):
+    # The brief's synthetic half of the grad oracle's positive coverage: the
+    # gradients come from a real compiled run, one of them is moved, and the
+    # oracle must point at that parameter by name and at nothing else.
+    eager = mlp_runset.results["eager"]
+    moved = dict(eager.param_grads)
+    moved["net.0.weight"] = moved["net.0.weight"] + 0.5
+    compiled = lane(
+        "inductor",
+        eager.outputs,
+        input_grads=list(eager.input_grads),
+        param_grads=moved,
+        grad_ran=True,
+        output_requires_grad=list(eager.output_requires_grad),
+    )
+
+    findings = GRAD.compare(eager, compiled, CFG)
+
+    assert [finding.details["field"] for finding in findings] == ["grad_values"]
+    assert findings[0].severity == "fail"
+    assert findings[0].details["tensor"] == "parameter net.0.weight"
+    assert "the gradient of parameter net.0.weight differs" in findings[0].message
+    # The other three parameters agree, and the oracle says nothing about them.
+    assert "net.2.weight" not in findings[0].message
+
+
+@pytest.fixture(scope="module")
+def frozen_param_runset():
+    """A model with a frozen layer, through every lane; inductor costs seconds."""
+    target = load_target(str(FIXTURES / "frozen_param.py"))
+    return run_all(target, ["eager", "aot_eager", "inductor"], seed=0)
+
+
+def test_a_frozen_parameter_is_absent_from_both_presence_sets(frozen_param_runset):
+    # The presence set is the set of tensors that got a gradient, not the set of
+    # parameters: a frozen layer is in every lane's parameter list and in no
+    # lane's gradients, and an oracle that confused the two would report this
+    # model as a divergence in every lane.
+    eager = frozen_param_runset.results["eager"]
+    assert eager.ok, eager.exception
+    assert eager.grad_present == ("parameter trainable.weight", "parameter trainable.bias")
+
+    for other in frozen_param_runset.others:
+        assert other.ok, other.exception
+        assert other.grad_present == eager.grad_present
+        assert GRAD.compare(eager, other, CFG) == []
+    # And the frozen layer really is still declared as a parameter.
+    frozen = load_target(str(FIXTURES / "frozen_param.py")).fn.frozen
+    assert [parameter.requires_grad for parameter in frozen.parameters()] == [False, False]
+
+
+def test_a_backward_that_only_the_compiled_lane_cannot_run_is_a_fail():
+    # The live half of the grad_error rule: a backend whose forward is the
+    # traced graph unchanged and whose backward raises, so the divergence is in
+    # the backward pass and nowhere else.
+    fixture = FIXTURES / "backward_raises.py"
+    backend = import_target_module(str(fixture)).BACKEND
+    runset = run_all(load_target(str(fixture)), ["eager", backend], seed=0)
+
+    eager, other = runset.results["eager"], runset.results[backend]
+    assert eager.ok, eager.exception
+    assert other.ok, other.exception  # the forward answered in both lanes
+    assert eager.grad_ran is True
+    assert other.grad_ran is False
+
+    findings = GRAD.compare(eager, other, CFG)
+
+    assert [finding.details["field"] for finding in findings] == ["grad_error_added"]
+    assert findings[0].severity == "fail"
+    assert f"raised RuntimeError under {backend} and completed under eager" in findings[0].message
+    # The forward is bit-identical, so no other oracle has anything to say: the
+    # divergence really is backward-only.
+    assert NUMERICS.compare(eager, other, CFG) == []
 
 
 def test_the_alias_oracle_is_silent_on_a_clean_model(mlp_runset):

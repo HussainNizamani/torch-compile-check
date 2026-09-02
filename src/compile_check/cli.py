@@ -339,6 +339,7 @@ def run(args: argparse.Namespace) -> int:
     cfg = OracleConfig(
         rtol=args.rtol,
         atol=args.atol,
+        grad=not args.no_grad,
         fp64=args.fp64_oracle,
         fp64_reference=runset.fp64,
     )
@@ -515,6 +516,7 @@ def run_only(args: argparse.Namespace) -> int:
     cfg = OracleConfig(
         rtol=args.rtol,
         atol=args.atol,
+        grad=not args.no_grad,
         fp64=args.fp64_oracle,
         fp64_reference=runset.fp64,
     )
