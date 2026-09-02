@@ -33,8 +33,10 @@ from pathlib import Path
 from typing import Any
 
 from compile_check import __version__
+from compile_check.discover import Target
 from compile_check.env import probe_apis
 from compile_check.localize import StageVerdict, localize
+from compile_check.minimize import Minimization, minimize
 from compile_check.oracles import (
     DEFAULT_GRAD_TOL_FACTOR,
     ORACLE_NAMES,
@@ -67,9 +69,12 @@ COLOR_CHOICES = ("auto", "always", "never")
 
 # Flags PLAN.md fixes in the v1 surface whose implementation lands later. Parsed
 # from M0 so the surface does not move, and reported as ignored rather than
-# silently accepted: a user who passed --budget and got no timeout must be told
-# why. --json and --md left this list in M3-2, when they started writing files.
-_PENDING_FLAGS: tuple[tuple[str, str], ...] = (("budget", "--budget"),)
+# silently accepted: a user who passed a flag and got nothing must be told why.
+# --baseline left this list in M3-1, --json and --md in M3-2, and --budget in
+# M3-3 with the minimizer it bounds. The tuple stays because the mechanism is
+# what stops a v0.2 flag from being accepted silently, not because v1 still has
+# one.
+_PENDING_FLAGS: tuple[tuple[str, str], ...] = ()
 
 # The flags that write a file, for the paths that produce no run and so have
 # nothing to write. Named in one place so a new one cannot be forgotten in the
@@ -182,6 +187,18 @@ def build_parser() -> argparse.ArgumentParser:
             "eager-versus-compiled idiom; a clean run writes no file and says so"
         ),
     )
+    # Not in PLAN.md's flag table either, for the same reason --emit-test is
+    # not: the table fixes the semantic surface, and PLAN.md "Minimizer, v1" is
+    # where the feature is specified. The M3-3 brief names the flag.
+    parser.add_argument(
+        "--minimize",
+        action="store_true",
+        help=(
+            "after a finding, shrink the case while it still reproduces: halve the "
+            "leading input dimension and replace child modules with a passthrough, "
+            "then report what is left (bounded by --budget)"
+        ),
+    )
     parser.add_argument(
         "--fail-on",
         metavar="LIST",
@@ -269,7 +286,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--budget",
         metavar="SECONDS",
         type=float,
-        help="wall-clock ceiling for the whole run, for CI use",
+        help=(
+            "wall-clock ceiling for the minimizer, for CI use; it bounds what "
+            "--minimize starts, and a pass that runs out says so and reports a "
+            "partial result. It cannot bound the run itself: a compile that has "
+            "started cannot be interrupted without killing the process"
+        ),
     )
     parser.add_argument(
         "--baseline",
@@ -392,15 +414,29 @@ def run(args: argparse.Namespace) -> int:
             print(
                 f"{PROG}: {flag} is not implemented yet (it lands in M3), ignored", file=sys.stderr
             )
+    if args.budget is not None and not args.minimize:
+        # --budget bounds the minimizer and nothing else, so a run without
+        # --minimize has nothing for it to bound. Said out loud for the reason
+        # every ignored flag is: a ceiling that quietly did nothing is worse
+        # than one that was refused.
+        print(
+            f"{PROG}: --budget bounds --minimize, which this run did not ask for; ignored",
+            file=sys.stderr,
+        )
 
-    runset, fail_on, baseline = _guarded_run(args)
-    if runset is None:
+    runset, fail_on, baseline, target = _guarded_run(args)
+    if runset is None or target is None:
         return EXIT_ERROR
 
     cfg = _oracle_config(args, runset, baseline)
     findings = _compare_backends(runset, cfg)
     verdict = localize(runset, findings)
     code = _exit_code(findings, verdict, fail_on)
+    # Before the report and after the verdict, which is the order PLAN.md
+    # "Minimizer, v1" fixes: the minimizer runs only after a finding, and it
+    # never changes what the run decided -- only how small the case the report
+    # shows is.
+    minimized = _minimize(args, target, runset, findings, verdict, cfg)
     print(
         render(
             runset,
@@ -410,6 +446,7 @@ def run(args: argparse.Namespace) -> int:
             grad_tol_factor=cfg.grad_tol_factor,
             baseline=baseline.path if baseline is not None else None,
             max_findings=args.max_findings,
+            minimized=minimized,
             color=_use_color(args.color),
         )
     )
@@ -417,9 +454,59 @@ def run(args: argparse.Namespace) -> int:
     # file that could not be written must not swallow it. The write failure is
     # still exit 2 -- a CI job that reads the artifact must not see a clean exit
     # and no artifact.
-    if not _write_reports(args, runset, findings, verdict, cfg, fail_on, code):
+    if not _write_reports(args, runset, findings, verdict, cfg, fail_on, code, minimized):
         return EXIT_ERROR
     return code
+
+
+def _minimize(
+    args: argparse.Namespace,
+    target: Target,
+    runset: RunSet,
+    findings: Sequence[Finding],
+    verdict: StageVerdict,
+    cfg: OracleConfig,
+) -> Minimization | None:
+    """Run the minimizer if ``--minimize`` asked for it, or say why there is nothing.
+
+    The finding is the one the regression-test emitter would write about, chosen
+    by the same call rather than by a second rule of its own, so the emitted
+    test and the minimized case are about the same divergence by construction.
+
+    Returns:
+        A :class:`compile_check.minimize.Minimization`, or ``None`` when
+        ``--minimize`` was not passed. The two are different facts and every
+        report keeps them apart: ``None`` prints no block, while a record with
+        nothing in it says the pass ran and found nothing to reduce.
+    """
+    if not args.minimize:
+        return None
+    from compile_check.report.pytest_case import select
+
+    finding = select(findings)
+    if finding is None:
+        return Minimization.not_attempted(_nothing_to_minimize(findings, verdict))
+    return minimize(target, runset, finding, cfg, budget=args.budget)
+
+
+def _nothing_to_minimize(findings: Sequence[Finding], verdict: StageVerdict) -> str:
+    """Why the minimizer had nothing to work from, in the words the user needs.
+
+    PLAN.md "Minimizer, v1": the pass runs only after a finding. The three ways
+    a run can have none are the three the regression-test emitter already has to
+    tell apart, so they are worded from the same place.
+    """
+    if not verdict.compared:
+        if verdict.eager_exception is not None:
+            return "the eager reference itself raised, so there is no divergence to shrink"
+        return "no eager reference lane ran, so there is no divergence to shrink"
+    if any(entry.raised is not None for entry in verdict.backends if entry.backend != "eager"):
+        return (
+            "the only signal in this run is a compiled lane that raised, and v1 shrinks a "
+            "fail-severity finding rather than an exception"
+        )
+    del findings  # every remaining case is the same one: nothing failed
+    return "this run has no fail-severity finding, so there is nothing to shrink"
 
 
 def _write_reports(
@@ -430,6 +517,7 @@ def _write_reports(
     cfg: OracleConfig,
     fail_on: Sequence[str],
     exit_code: int,
+    minimized: Minimization | None = None,
 ) -> bool:
     """Write whichever of ``--json``, ``--md`` and ``--emit-test`` were asked for.
 
@@ -457,6 +545,7 @@ def _write_reports(
             atol=cfg.atol,
             baseline=baseline,
             fp64=cfg.fp64,
+            minimized=minimized,
             exit_code=exit_code,
         )
         written &= _write(args.json, "--json", lambda: json_report.dump(document, Path(args.json)))
@@ -469,10 +558,11 @@ def _write_reports(
             grad_tol_factor=cfg.grad_tol_factor,
             baseline=baseline,
             max_findings=args.max_findings,
+            minimized=minimized,
         )
         written &= _write(args.md, "--md", lambda: _write_text(Path(args.md), draft))
     if args.emit_test is not None:
-        case = pytest_case.emit(runset, findings, verdict)
+        case = pytest_case.emit(runset, findings, verdict, minimized=minimized)
         if case is None:
             # Not a failure, and not silent either: a user who asked for a test
             # and got no file has to be told which of the two reasons it was.
@@ -600,7 +690,9 @@ def _use_color(choice: str) -> bool:
     return sys.stdout.isatty() and not os.environ.get("NO_COLOR")
 
 
-def _guarded_run(args: argparse.Namespace) -> tuple[RunSet | None, list[str], Baseline | None]:
+def _guarded_run(
+    args: argparse.Namespace,
+) -> tuple[RunSet | None, list[str], Baseline | None, Target | None]:
     """Validate the flags, load the target, and run every backend.
 
     M1-1 review carry-over (0): the main path and ``--run-only`` share one
@@ -638,9 +730,15 @@ def _guarded_run(args: argparse.Namespace) -> tuple[RunSet | None, list[str], Ba
     mirror image and happens after, because it records what the run found.
 
     Returns:
-        The runset, the parsed ``--fail-on`` categories, and the parsed
-        ``--baseline``, or ``(None, [], None)`` once a one-line tool error has
-        been printed to stderr.
+        The runset, the parsed ``--fail-on`` categories, the parsed
+        ``--baseline``, and the target the run was made from, or four ``None``s
+        (and an empty category list) once a one-line tool error has been printed
+        to stderr.
+
+        The target travels out because the minimizer of M3-3 re-runs it: a
+        :class:`~compile_check.results.RunSet` is records, and a record cannot
+        be called. It is the same object, already moved onto ``--device`` by the
+        runner, so the candidates run where the finding was found.
     """
     from compile_check.discover import DiscoveryError, load_target
     from compile_check.runner import (
@@ -658,7 +756,7 @@ def _guarded_run(args: argparse.Namespace) -> tuple[RunSet | None, list[str], Ba
         fail_on = parse_fail_on(args.fail_on)
     except ValueError as exc:
         _tool_error(str(exc))
-        return None, [], None
+        return None, [], None, None
 
     baseline: Baseline | None = None
     if args.baseline is not None:
@@ -666,7 +764,7 @@ def _guarded_run(args: argparse.Namespace) -> tuple[RunSet | None, list[str], Ba
             baseline = read_baseline(args.baseline)
         except BaselineError as exc:
             _tool_error(str(exc))
-            return None, [], None
+            return None, [], None, None
 
     try:
         validate_backends(backends, defer_unknown=True)
@@ -688,21 +786,21 @@ def _guarded_run(args: argparse.Namespace) -> tuple[RunSet | None, list[str], Ba
     except (DiscoveryError, RunnerError) as exc:
         # Ours, with a message written for a user: print it as it is.
         _tool_error(str(exc))
-        return None, [], None
+        return None, [], None, None
     except Exception as exc:
         # Not ours: a torch internal, a bad --entry object, an OSError. The
         # class name carries information a bare message would not, and the
         # traceback is still available with logging turned up.
         log.debug("the run failed", exc_info=True)
         _tool_error(f"{type(exc).__name__}: {exc}")
-        return None, [], None
+        return None, [], None, None
 
     if args.write_baseline is not None:
         try:
             written = write_baseline(args.write_baseline, runset)
         except OSError as exc:
             _tool_error(f"cannot write the graph baseline {args.write_baseline}: {exc}")
-            return None, [], None
+            return None, [], None, None
         # On stderr, so that a report piped to a file stays the report. An
         # empty list is worth saying out loud: it means no lane had measurable
         # graph health, and the file on disk is `{}`.
@@ -711,7 +809,7 @@ def _guarded_run(args: argparse.Namespace) -> tuple[RunSet | None, list[str], Ba
             f"({', '.join(written) if written else 'no lane had measurable graph health'})",
             file=sys.stderr,
         )
-    return runset, fail_on, baseline
+    return runset, fail_on, baseline, target
 
 
 def parse_fail_on(spec: str) -> list[str]:
@@ -748,7 +846,7 @@ def run_only(args: argparse.Namespace) -> int:
     result, which is PLAN.md's rule that a model raising in eager is a tool
     error.
     """
-    runset, fail_on, baseline = _guarded_run(args)
+    runset, fail_on, baseline, _ = _guarded_run(args)
     if runset is None:
         return EXIT_ERROR
 
