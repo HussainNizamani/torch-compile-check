@@ -199,17 +199,17 @@ def test_every_module_imports():
 
 def test_stubs_raise_not_implemented():
     # discover.py and runner.py landed in M1-1, the numerics and metadata
-    # oracles in M1-2, and localize.py plus report/terminal.py in M1-3; each is
-    # covered by its own test module. What is left below is what M2 and M3
-    # still owe.
+    # oracles in M1-2, localize.py plus report/terminal.py in M1-3, and the
+    # alias oracle in M2-1; each is covered by its own test module. What is left
+    # below is what M2-2 and M3 still owe.
     from compile_check import minimize
-    from compile_check.oracles import alias, grad, graph
+    from compile_check.oracles import grad, graph
     from compile_check.report import json as json_report
     from compile_check.report import markdown, pytest_case
 
     with pytest.raises(NotImplementedError):
         minimize.minimize(None, None, lambda _fn, _inputs: True)
-    for oracle in (alias, grad, graph):
+    for oracle in (grad, graph):
         with pytest.raises(NotImplementedError):
             oracle.check({}, {})
     with pytest.raises(NotImplementedError):
@@ -266,10 +266,10 @@ def test_run_only_reports_the_oracles_and_finds_nothing_on_a_clean_model(capsys)
     code = main([str(FIXTURES / "mlp.py"), "--run-only", "--backends", "eager,aot_eager"])
     out = capsys.readouterr().out
     assert code == EXIT_OK
-    # The two that run, and the three that do not exist yet: "not checked"
+    # The three that run, and the two that do not exist yet: "not checked"
     # must not read as "checked and clean".
-    assert "oracles    numerics, metadata" in out
-    assert "not implemented yet, nothing checked: alias, grad, graph" in out
+    assert "oracles    numerics, alias, metadata" in out
+    assert "not implemented yet, nothing checked: grad, graph" in out
     assert "findings\n  none" in out
 
 
@@ -282,7 +282,7 @@ def test_fail_on_narrows_the_verdict_not_the_checks(capsys):
     )
     out = capsys.readouterr().out
     assert code == EXIT_OK
-    assert "oracles    numerics, metadata" in out
+    assert "oracles    numerics, alias, metadata" in out
     assert "fail-on    metadata\n" in out
 
 

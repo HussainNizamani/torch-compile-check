@@ -27,16 +27,18 @@ from compile_check.oracles import (
     OracleConfig,
     run_oracles,
 )
+from compile_check.oracles.alias import AliasOracle, relation
 from compile_check.oracles.metadata import MetadataOracle
 from compile_check.oracles.numerics import FALLBACK_TOLERANCES, NumericsOracle, resolve_tolerances
 from compile_check.results import BackendResult, CapturedException
-from compile_check.runner import FP64_BACKEND, run_all
+from compile_check.runner import FP64_BACKEND, run_all, run_backend
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 CASES = REPO_ROOT / "cases"
 
 NUMERICS = NumericsOracle()
+ALIAS = AliasOracle()
 METADATA = MetadataOracle()
 CFG = OracleConfig()
 
@@ -444,13 +446,290 @@ def test_the_fp64_reference_is_only_read_behind_the_flag():
 
 
 # --------------------------------------------------------------------------
+# alias: the relation between outputs and inputs
+# --------------------------------------------------------------------------
+
+
+def lanes(eager_fn: Any, compiled_fn: Any, inputs: tuple[Any, ...]) -> Any:
+    """Two lanes, from two plain callables, without compiling anything.
+
+    Both are run through the real :func:`run_backend`, so the records under test
+    are the records a run really produces -- live output objects, live input
+    objects, and the snapshots taken around the call -- rather than a hand-built
+    approximation of them. The second is relabelled ``inductor`` because what an
+    oracle compares is one lane against the reference, and running the compiler
+    to obtain a divergence that can be written in one line would cost seconds
+    and depend on what this torch happens to do.
+    """
+    expected = run_backend(eager_fn, inputs, "eager", grad=False)
+    got = run_backend(compiled_fn, inputs, "eager", grad=False)
+    got.backend = "inductor"
+    return expected, got
+
+
+def independent(x: torch.Tensor) -> torch.Tensor:
+    """A result that shares nothing with the input, which is the usual case."""
+    return x.clone()
+
+
+def a_view_of_the_input(x: torch.Tensor) -> torch.Tensor:
+    """A distinct object over the input's storage: an alias, not an identity."""
+    return x[:]
+
+
+def base_and_view(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """The 191449 shape in eager: two objects, one storage."""
+    base = x + 1
+    return base, base.view(-1)
+
+
+def one_object_twice(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """The 191449 shape after the collapse: one object returned twice."""
+    base = x + 1
+    return base, base
+
+
+def test_an_alias_the_compiled_lane_added_is_a_fail():
+    # PLAN.md "alias", the 195451 class: the values are identical in both
+    # worlds and the compiled result is a view of the input, so a caller that
+    # writes into it corrupts the input.
+    findings = ALIAS.compare(*lanes(independent, a_view_of_the_input, (torch.ones(4),)), CFG)
+
+    assert [finding.severity for finding in findings] == ["fail"]
+    finding = findings[0]
+    assert finding.oracle == "alias"
+    assert finding.backend == "inductor"
+    assert finding.output_index == 0
+    assert finding.details["field"] == "alias_added"
+    assert "inductor output[0] aliases input[0]" in finding.message
+
+
+def test_an_alias_the_compiled_lane_dropped_is_a_fail():
+    # The other direction is a contract break too: a caller writing through the
+    # view eager gave it expects the write to land.
+    findings = ALIAS.compare(*lanes(a_view_of_the_input, independent, (torch.ones(4),)), CFG)
+
+    assert [finding.details["field"] for finding in findings] == ["alias_dropped"]
+    assert "eager output[0] aliases input[0]" in findings[0].message
+
+
+def test_the_input_returned_as_the_output_is_a_fail():
+    findings = ALIAS.compare(*lanes(independent, lambda x: x, (torch.ones(4),)), CFG)
+
+    assert [finding.details["field"] for finding in findings] == ["identity_added"]
+    assert findings[0].severity == "fail"
+    assert "inductor returned input[0] itself as output[0]" in findings[0].message
+
+
+def test_two_outputs_collapsed_into_one_object_is_a_fail():
+    # PLAN.md "Where divergence appears is not always where the fix belongs":
+    # this is 191449, whose fix lives in AOTAutograd and whose symptom is here.
+    findings = ALIAS.compare(*lanes(base_and_view, one_object_twice, (torch.zeros(2),)), CFG)
+
+    assert [finding.details["field"] for finding in findings] == ["identity_added"]
+    assert findings[0].severity == "fail"
+    assert "one object for output[0] and output[1]" in findings[0].message
+    assert "distinct objects that share a storage" in findings[0].message
+
+
+def test_one_object_split_into_two_is_a_fail():
+    findings = ALIAS.compare(*lanes(one_object_twice, base_and_view, (torch.zeros(2),)), CFG)
+
+    assert [finding.details["field"] for finding in findings] == ["identity_dropped"]
+    assert "eager returned one object for output[0] and output[1]" in findings[0].message
+
+
+def test_the_same_relation_in_both_lanes_is_silent():
+    # The negative test, which is the one that keeps the oracle honest: an alias
+    # is not a finding, a *difference* in aliasing is.
+    assert (
+        ALIAS.compare(*lanes(a_view_of_the_input, a_view_of_the_input, (torch.ones(4),)), CFG) == []
+    )
+    assert ALIAS.compare(*lanes(base_and_view, base_and_view, (torch.zeros(2),)), CFG) == []
+    assert ALIAS.compare(*lanes(independent, independent, (torch.ones(4),)), CFG) == []
+
+
+def test_a_mutation_only_the_compiled_lane_made_is_a_fail():
+    def mutates(x: torch.Tensor) -> torch.Tensor:
+        total = x.sum()
+        x.zero_()
+        return total
+
+    findings = ALIAS.compare(*lanes(torch.Tensor.sum, mutates, (torch.ones(3),)), CFG)
+
+    assert [finding.details["field"] for finding in findings] == ["mutation_added"]
+    finding = findings[0]
+    assert finding.severity == "fail"
+    # A mutated input belongs to the run, not to an output index.
+    assert finding.output_index is None
+    assert finding.message == "inductor mutated input[0] in place and eager did not"
+
+
+def test_a_mutation_the_compiled_lane_skipped_is_a_fail():
+    def mutates(x: torch.Tensor) -> torch.Tensor:
+        total = x.sum()
+        x.zero_()
+        return total
+
+    findings = ALIAS.compare(*lanes(mutates, torch.Tensor.sum, (torch.ones(3),)), CFG)
+
+    assert [finding.details["field"] for finding in findings] == ["mutation_dropped"]
+    assert findings[0].message == "eager mutated input[0] in place and inductor did not"
+
+
+def test_a_write_back_of_the_same_values_is_not_a_mutation():
+    # PLAN.md "alias": the mutation set is over the bytes, so a call that writes
+    # back what was already there is deliberately not counted.
+    def writes_the_same_values(x: torch.Tensor) -> torch.Tensor:
+        x.copy_(x.clone())
+        return x.sum()
+
+    assert (
+        ALIAS.compare(*lanes(torch.Tensor.sum, writes_the_same_values, (torch.ones(3),)), CFG) == []
+    )
+
+
+def test_an_in_place_resize_is_a_metadata_mutation():
+    def resizes(x: torch.Tensor) -> torch.Tensor:
+        total = x.sum()
+        x.resize_(2, 6)
+        return total
+
+    findings = ALIAS.compare(*lanes(torch.Tensor.sum, resizes, (torch.ones(3, 4),)), CFG)
+
+    # Both, and in this order: the bytes the tensor covers are not the bytes it
+    # covered, and the layout finding beside it says which of the two happened.
+    assert [finding.details["field"] for finding in findings] == [
+        "mutation_added",
+        "metadata_mutation_added",
+    ]
+    layout = findings[1]
+    assert layout.severity == "fail"
+    assert "inductor changed the shape, stride of input[0] in place" in layout.message
+    assert "float32(3, 4) stride (4, 1) offset 0 -> float32(2, 6) stride (6, 1) offset 0" in (
+        layout.message
+    )
+
+
+def test_two_disjoint_views_of_one_buffer_are_not_an_alias():
+    # PLAN.md "alias": storage identity alone is not sufficient, since two
+    # disjoint views of one buffer share a data pointer. Recorded, never a
+    # verdict.
+    def two_views(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        buffer = x + 1
+        return buffer[:2], buffer[2:]
+
+    def two_tensors(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        buffer = x + 1
+        return buffer[:2].clone(), buffer[2:].clone()
+
+    findings = ALIAS.compare(*lanes(two_views, two_tensors, (torch.ones(4),)), CFG)
+
+    assert [finding.severity for finding in findings] == ["info"]
+    assert findings[0].details["field"] == "buffer_sharing"
+    assert "allocation choice rather than an alias" in findings[0].message
+    # And the same relation on both sides says nothing at all.
+    assert ALIAS.compare(*lanes(two_views, two_views, (torch.ones(4),)), CFG) == []
+
+
+def test_an_output_that_overlaps_itself_is_recorded_as_context():
+    # PLAN.md "alias": torch._debug_has_internal_overlap per tensor, as context,
+    # since a self-overlapping output changes what a downstream write means.
+    def expanded(x: torch.Tensor) -> torch.Tensor:
+        return (x + 1).expand(3, 4)
+
+    def materialised(x: torch.Tensor) -> torch.Tensor:
+        return (x + 1).expand(3, 4).contiguous()
+
+    findings = ALIAS.compare(*lanes(materialised, expanded, (torch.ones(1, 4),)), CFG)
+
+    assert [finding.severity for finding in findings] == ["info"]
+    assert findings[0].details == {
+        "field": "internal_overlap",
+        "expected": 0,
+        "got": 1,
+        "eager_relation": ["no aliases, no mutations"],
+        "compiled_relation": ["output[0] self-overlapping"],
+    }
+
+
+def test_every_finding_carries_both_relations():
+    findings = ALIAS.compare(*lanes(independent, a_view_of_the_input, (torch.ones(4),)), CFG)
+
+    details = findings[0].details
+    assert details["eager_relation"] == ["no aliases, no mutations"]
+    assert details["compiled_relation"] == ["output[0]~input[0] overlapping"]
+    assert details["expected"] == "output[0]~input[0] unrelated"
+    assert details["got"] == "output[0]~input[0] overlapping"
+
+
+def test_a_hand_built_pair_of_results_is_read_the_same_way():
+    # The one pair assembled field by field rather than run: it pins that the
+    # oracle reads output_refs and input_refs, and would notice a runner that
+    # stopped filling them.
+    shared = torch.ones(4)
+    eager = BackendResult(
+        backend="eager",
+        outputs=[shared.clone()],
+        output_refs=[shared.clone()],
+        inputs_before=[shared.clone()],
+        inputs_after=[shared.clone()],
+        input_refs=[shared],
+    )
+    other = BackendResult(
+        backend="inductor",
+        outputs=[shared.clone()],
+        output_refs=[shared],
+        inputs_before=[shared.clone()],
+        inputs_after=[shared.clone()],
+        input_refs=[shared],
+    )
+    findings = ALIAS.compare(eager, other, CFG)
+
+    assert [finding.details["field"] for finding in findings] == ["identity_added"]
+
+
+def test_the_alias_oracle_says_nothing_about_a_lane_that_raised():
+    eager, other = lanes(independent, independent, (torch.ones(4),))
+    other.exception = CapturedException(type="RuntimeError", message="boom", traceback=())
+    other.outputs, other.output_refs = [], []
+
+    assert ALIAS.compare(eager, other, CFG) == []
+
+
+def test_an_output_count_difference_is_reported_and_the_rest_still_compared():
+    def one_output(x: torch.Tensor) -> torch.Tensor:
+        return x[:]
+
+    def two_outputs(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        return x.clone(), x.clone()
+
+    findings = ALIAS.compare(*lanes(one_output, two_outputs, (torch.ones(4),)), CFG)
+
+    fields = [finding.details["field"] for finding in findings]
+    # One output against a pair of them differs in structure and in count, and
+    # both of those are align_outputs' findings, worded once for every oracle.
+    assert fields == ["output_spec", "output_count", "alias_dropped"]
+    # The structural differences belong to no output; the alias one to output 0,
+    # which both lanes have.
+    assert [finding.output_index for finding in findings] == [None, None, 0]
+
+
+def test_a_non_tensor_leaf_is_related_to_nothing():
+    def with_a_label(x: torch.Tensor) -> tuple[torch.Tensor, str]:
+        return x[:], "annotation"
+
+    assert ALIAS.compare(*lanes(with_a_label, with_a_label, (torch.ones(4),)), CFG) == []
+
+
+# --------------------------------------------------------------------------
 # the registry
 # --------------------------------------------------------------------------
 
 
 def test_the_registry_is_a_subset_of_the_fail_on_vocabulary():
     assert set(ORACLES) <= set(ORACLE_NAMES)
-    assert list(ORACLES) == ["numerics", "metadata"]
+    assert list(ORACLES) == ["numerics", "alias", "metadata"]
     for name, oracle in ORACLES.items():
         assert isinstance(oracle, Oracle)
         assert oracle.name == name
@@ -487,6 +766,20 @@ def test_a_clean_model_produces_no_fail_findings(mlp_runset):
         OracleConfig(fp64=True, fp64_reference=mlp_runset.fp64),
     )
     assert [finding for finding in findings if finding.severity == "fail"] == []
+
+
+def test_the_alias_oracle_is_silent_on_a_clean_model(mlp_runset):
+    # The negative test that matters most for this oracle: a linear-relu-linear
+    # stack allocates plenty of buffers, and none of that is an alias
+    # divergence. A checker that fires here would be worse than no checker.
+    eager, inductor = mlp_runset.results["eager"], mlp_runset.results["inductor"]
+    assert eager.ok, eager.exception
+    assert inductor.ok, inductor.exception
+    assert ALIAS.compare(eager, inductor, CFG) == []
+    # And the relation it compared is not empty of information by accident: the
+    # run really did have outputs and inputs to relate.
+    assert relation(torch, inductor).outputs == 1
+    assert relation(torch, inductor).inputs == 1
 
 
 def test_the_fp64_reference_runs_beside_the_backends(mlp_runset):

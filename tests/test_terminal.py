@@ -130,7 +130,7 @@ backends
 checks
   oracle    fail-on  aot_eager         inductor
   numerics  yes      pass              pass
-  alias     yes      not yet           not yet
+  alias     yes      pass              pass
   metadata  yes      pass              pass
   grad      yes      not yet           not yet
   graph     no       not yet           not yet
@@ -168,7 +168,7 @@ backends
 checks
   oracle    fail-on  aot_eager         inductor
   numerics  yes      pass              1 fail
-  alias     no       not yet           not yet
+  alias     no       pass              pass
   metadata  yes      pass              1 fail 1 warn
   grad      no       not yet           not yet
   graph     no       not yet           not yet
