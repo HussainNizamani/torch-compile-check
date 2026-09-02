@@ -103,6 +103,29 @@ def test_the_summary_module_resolves_the_way_ci_invokes_it():
     assert Path(completed.stdout.strip()) == CASES_DIR
 
 
+def test_the_summary_module_also_resolves_when_it_is_run_as_a_plain_script(tmp_path):
+    # The other invocation, `python cases/summary.py`, which puts cases/ on the
+    # path instead of the root and needs the bootstrap at the top of that file.
+    # runpy under a run_name that is not "__main__" executes the module body --
+    # imports and bootstrap -- without calling main(), so this costs no compiles
+    # either. From tmp_path, so the repository root cannot be on the path by
+    # accident and pass the test for the wrong reason.
+    script = CASES_DIR / "summary.py"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            f"import runpy; ns = runpy.run_path({str(script)!r}, run_name='probe'); "
+            "print(len(ns['CASES']))",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == str(len(CASES))
+
+
 # --------------------------------------------------------------------------
 # the version arithmetic, against strings rather than against this machine
 # --------------------------------------------------------------------------
