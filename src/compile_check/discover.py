@@ -23,10 +23,13 @@ import importlib
 import importlib.util
 import logging
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
 from typing import Any
+
+from compile_check.results import TargetSource
 
 __all__ = ["DiscoveryError", "Target", "load_target"]
 
@@ -64,6 +67,14 @@ class Target:
     name: str = "<target>"
     """``module:attribute``, for the report header."""
 
+    source: TargetSource | None = None
+    """Where the target came from, for the reports that quote it.
+
+    ``None`` for a hand-built target. The two M3-2 reports that inline the
+    user's own code -- the Markdown repro and the emitted regression test --
+    read it; nothing that decides a verdict does.
+    """
+
 
 def load_target(
     path_or_module: str,
@@ -89,15 +100,51 @@ def load_target(
             could be resolved.
     """
     module = import_target_module(path_or_module)
-    fn, name = _resolve_entry(module, entry)
-    args, kwargs = _resolve_inputs(module, inputs)
+    fn, name, entry_attr = _resolve_entry(module, entry)
+    args, kwargs, inputs_attr = _resolve_inputs(module, inputs)
     log.debug(
         "discovered %s with %d positional and %d keyword inputs",
         name,
         len(args),
         len(kwargs),
     )
-    return Target(fn=fn, example_inputs=args, kwargs=kwargs, name=name)
+    return Target(
+        fn=fn,
+        example_inputs=args,
+        kwargs=kwargs,
+        name=name,
+        source=_target_source(module, entry_attr, inputs_attr, kwargs),
+    )
+
+
+def _target_source(
+    module: ModuleType,
+    entry_attr: str | None,
+    inputs_attr: str | None,
+    kwargs: Mapping[str, Any],
+) -> TargetSource:
+    """Record where the target came from, for the reports that quote it.
+
+    The file is read here, once, rather than by a report: a report is rendered
+    from records, and by the time one is rendered the target module has already
+    been imported and executed, so the file it came from is not guaranteed to
+    still be readable. Failing to read it is not a discovery failure -- a run
+    with no Markdown repro is still a run -- so the text is simply ``None``.
+    """
+    path = _module_file(module)
+    text: str | None = None
+    if path is not None:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            log.debug("could not read the target source at %s: %s", path, exc)
+    return TargetSource(
+        file=str(path) if path is not None else None,
+        text=text,
+        entry=entry_attr,
+        inputs=inputs_attr,
+        keyword_inputs=tuple(kwargs),
+    )
 
 
 def import_target_module(path_or_module: str) -> ModuleType:
@@ -173,16 +220,21 @@ def _module_file(module: ModuleType) -> Path | None:
     return Path(filename).resolve()
 
 
-def _resolve_entry(module: ModuleType, entry: str | None) -> tuple[Any, str]:
-    """Return the ``(callable, name)`` to test."""
+def _resolve_entry(module: ModuleType, entry: str | None) -> tuple[Any, str, str | None]:
+    """Return the ``(callable, name, attribute)`` to test.
+
+    The third value is the attribute path *on this module*, which is what a
+    repro built from this file can name, or ``None`` when the entry point came
+    from somewhere else.
+    """
     if entry is not None:
-        obj, name = _resolve_spec(entry, module, "--entry")
+        obj, name, attr_path = _resolve_spec(entry, module, "--entry")
     else:
-        obj, name = _MISSING, ""
+        obj, name, attr_path = _MISSING, "", None
         for attr in ENTRY_ATTRS:
             candidate = getattr(module, attr, _MISSING)
             if candidate is not _MISSING:
-                obj, name = candidate, f"{module.__name__}:{attr}"
+                obj, name, attr_path = candidate, f"{module.__name__}:{attr}", attr
                 break
         if obj is _MISSING:
             raise DiscoveryError(
@@ -194,21 +246,25 @@ def _resolve_entry(module: ModuleType, entry: str | None) -> tuple[Any, str]:
 
     if not callable(obj):
         raise DiscoveryError(f"{name} is not callable (it is a {type(obj).__name__})")
-    return obj, name
+    return obj, name, attr_path
 
 
 def _resolve_inputs(
     module: ModuleType, inputs: str | None
-) -> tuple[tuple[Any, ...], dict[str, Any]]:
-    """Return the ``(args, kwargs)`` to call the entry point with."""
+) -> tuple[tuple[Any, ...], dict[str, Any], str | None]:
+    """Return the ``(args, kwargs, attribute)`` to call the entry point with.
+
+    The third value follows the rule of :func:`_resolve_entry`: the attribute
+    path on this module, or ``None`` when the inputs came from another one.
+    """
     if inputs is not None:
-        obj, name = _resolve_spec(inputs, module, "--inputs")
+        obj, name, attr_path = _resolve_spec(inputs, module, "--inputs")
     else:
-        obj, name = _MISSING, ""
+        obj, name, attr_path = _MISSING, "", None
         for attr in INPUT_ATTRS:
             candidate = getattr(module, attr, _MISSING)
             if candidate is not _MISSING:
-                obj, name = candidate, f"{module.__name__}:{attr}"
+                obj, name, attr_path = candidate, f"{module.__name__}:{attr}", attr
                 break
         if obj is _MISSING:
             raise DiscoveryError(
@@ -225,7 +281,8 @@ def _resolve_inputs(
         except Exception as exc:
             raise DiscoveryError(f"calling {name} raised {type(exc).__name__}: {exc}") from exc
 
-    return _normalise_inputs(obj, name)
+    args, kwargs = _normalise_inputs(obj, name)
+    return args, kwargs, attr_path
 
 
 def _normalise_inputs(obj: Any, name: str) -> tuple[tuple[Any, ...], dict[str, Any]]:
@@ -250,8 +307,13 @@ def _normalise_inputs(obj: Any, name: str) -> tuple[tuple[Any, ...], dict[str, A
     return (obj,), {}
 
 
-def _resolve_spec(spec: str, module: ModuleType, flag: str) -> tuple[Any, str]:
-    """Resolve a ``module:attribute`` override against ``module`` as the default."""
+def _resolve_spec(spec: str, module: ModuleType, flag: str) -> tuple[Any, str, str | None]:
+    """Resolve a ``module:attribute`` override against ``module`` as the default.
+
+    The third value is the attribute path when it was resolved against the
+    target module itself, and ``None`` when the override named another module:
+    the name is then not one a repro built from the target's own file could use.
+    """
     module_part, sep, attr_part = spec.partition(":")
     if sep:
         if not attr_part:
@@ -272,7 +334,7 @@ def _resolve_spec(spec: str, module: ModuleType, flag: str) -> tuple[Any, str]:
         if candidate is _MISSING:
             raise DiscoveryError(f"{flag} {spec!r}: {walked} has no attribute {attr!r}")
         obj, walked = candidate, f"{walked}.{attr}"
-    return obj, f"{target.__name__}:{attr_path}"
+    return obj, f"{target.__name__}:{attr_path}", attr_path if target is module else None
 
 
 def _names_module(module_part: str, module: ModuleType) -> bool:

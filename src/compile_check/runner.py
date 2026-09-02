@@ -263,6 +263,10 @@ def run_all(
         grad=grad,
         share_module=share_module,
         target_is_module=isinstance(fn, torch.nn.Module),
+        # Carried rather than re-derived: the reports that quote the user's code
+        # are rendered long after the target module was executed, and by then
+        # the only record of where it came from is this one.
+        target_source=target.source,
         env=collect_environment(),
     )
     if fp64:

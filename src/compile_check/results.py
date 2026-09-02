@@ -26,6 +26,7 @@ __all__ = [
     "GraphBreak",
     "GraphHealth",
     "RunSet",
+    "TargetSource",
     "TensorMeta",
 ]
 
@@ -82,6 +83,51 @@ class TensorMeta:
 
     storage_ptr: int
     """``untyped_storage().data_ptr()``: which buffer the tensor lives in."""
+
+
+@dataclass(frozen=True)
+class TargetSource:
+    """Where the target came from, and the text it was written as.
+
+    Recorded for the two M3-2 reports that quote the user's own code rather than
+    describing it: PLAN.md "Reports" wants the minimal repro inline in the
+    Markdown draft, and PLAN.md "Regression test emission" wants the same case
+    as a test method. Both need the source, and neither can get it from the
+    records the oracles read, which are numbers and labels by design.
+
+    One record rather than five fields on :class:`RunSet`, because the five are
+    one fact -- what discovery resolved -- and a report that has any of them
+    wants the rest. ``None`` on a :class:`RunSet` means the run was not built
+    through :func:`compile_check.discover.load_target` (a hand-built record, or
+    a target with no file), which is not the same as a target whose file could
+    not be read: that one arrives with :attr:`text` at ``None``.
+    """
+
+    file: str | None
+    """The target's ``__file__``, for a report to name. ``None`` for a module
+    with no file, e.g. one built in memory."""
+
+    text: str | None
+    """The file's source, verbatim. ``None`` when it could not be read."""
+
+    entry: str | None
+    """The attribute discovery resolved as the entry point, as an expression
+    against the target module: ``model``, ``fn``, or whatever ``--entry`` named.
+
+    ``None`` when the entry point lives in another module, which ``--entry
+    other:thing`` allows: the name would not resolve inside a repro built from
+    this file, and a report that wrote it anyway would hand out code that does
+    not run.
+    """
+
+    inputs: str | None
+    """The attribute the inputs came from: ``inputs``, ``get_inputs``, or what
+    ``--inputs`` named. ``None`` under the same rule as :attr:`entry`."""
+
+    keyword_inputs: tuple[str, ...] = ()
+    """The keyword names the target is called with, when the inputs were a
+    mapping. Empty for the ordinary positional case. A report that emits a call
+    has to know which of the two it is writing."""
 
 
 @dataclass(frozen=True)
@@ -399,6 +445,14 @@ class RunSet:
     have leaked state into each other has to say so where the evidence is read.
     """
 
+    target_source: TargetSource | None = None
+    """Where the target came from and what it was written as, or ``None``.
+
+    Filled by :func:`compile_check.runner.run_all` from the discovered target,
+    and read only by the Markdown draft and the test emitter of M3-2, which are
+    the two reports that quote the user's code. Nothing here is compared.
+    """
+
     results: dict[str, BackendResult] = field(default_factory=dict)
     env: dict[str, Any] = field(default_factory=dict)
     """``env.collect_environment()``, taken after torch was imported and after
@@ -413,6 +467,32 @@ class RunSet:
     stage verdict names. ``None`` when the flag was off or the target could not
     be run at float64.
     """
+
+    @property
+    def module_handling(self) -> str:
+        """What actually happened to the module, not what the flags asked for.
+
+        Three states, and the M3 brief's point is that the third one used to be
+        invisible. ``--share-module`` is a choice; a module that refused
+        ``copy.deepcopy`` gets the same sharing without having chosen it, and
+        until M3-1 that showed in the report as "deep copied per lane" with the
+        reason only in a warning log. A run whose lanes may have leaked state
+        into each other has to say so where the evidence is read.
+
+        A target that is not an ``nn.Module`` gets neither sentence: a function
+        has no parameters or buffers, so there was never a copy to make or skip.
+
+        Written here rather than in one of the reports because both the terminal
+        block and the JSON environment block have to say it, and two sentences
+        that could drift apart would let a report contradict its own artifact.
+        """
+        if not self.target_is_module:
+            return "not copied: the target is a plain callable, with no state to isolate"
+        if self.share_module:
+            return "shared across every lane (--share-module)"
+        if self.module_copy_error is not None:
+            return f"shared across every lane (deep copy failed: {self.module_copy_error})"
+        return "deep copied per lane"
 
     @property
     def backends(self) -> list[str]:
