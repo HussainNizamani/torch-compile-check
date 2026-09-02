@@ -1301,6 +1301,40 @@ def test_the_three_report_flags_write_their_files_on_a_red_case(capsys, tmp_path
         compile(emitted, str(out / "test_case.py"), "exec")
 
 
+def test_the_emitted_graph_break_test_actually_fails_on_the_break_it_was_written_for(tmp_path):
+    # Defect 1 regression. torch's own graph_break_count is unreliable
+    # (runner.py floors it with len(break_reasons)): 194593's data-dependent
+    # branch comes back graph_break_count 0 with one break reason, so an
+    # emitted test that asserted only the count PASSED on the very bug it was
+    # written for. Proven by actually running the emitted file under pytest,
+    # not by inspecting its source -- that is the only way a passing assertion
+    # on a real torch is caught.
+    path = tmp_path / "test_graph_break.py"
+    code = main(
+        [
+            str(CASES / "distributions_binomial_kl.py"),
+            "--fullgraph",
+            "--fail-on",
+            "graph",
+            "--emit-test",
+            str(path),
+            "--color",
+            "never",
+        ]
+    )
+    assert code == EXIT_FINDING
+    assert path.exists()
+
+    completed = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", str(path)],
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 1, completed.stdout + completed.stderr
+    assert "1 failed" in completed.stdout, completed.stdout
+
+
 def test_emit_test_writes_nothing_on_a_clean_run_and_says_so(capsys, tmp_path):
     path = tmp_path / "test_case.py"
     code = main(

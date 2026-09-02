@@ -263,14 +263,22 @@ def test_a_parameter_gradient_finding_runs_the_lanes_one_after_the_other():
     assert "torch.testing.assert_close(actual_grad, expected_grad)" in case
 
 
-def test_a_graph_finding_asserts_on_the_break_count():
+def test_a_graph_finding_asserts_on_both_the_break_reasons_and_the_count():
+    # torch's own graph_break_count is unreliable (runner.py floors it with
+    # len(break_reasons)): a case can come back graph_break_count 0 with a
+    # break reason recorded, which would make an assertion on the count alone
+    # pass on the very case it was written for.
     case = emitted(
         make_runset(),
         [finding("graph", output_index=None, details={"field": "break_reasons"})],
     )
 
     assert "explained = torch._dynamo.explain(fn)(*make_inputs())" in case
-    assert "self.assertEqual(explained.graph_break_count, 0)" in case
+    assert "self.assertEqual(list(explained.break_reasons), [])" in case
+    assert (
+        "self.assertEqual(max(explained.graph_break_count, len(explained.break_reasons)), 0)"
+        in case
+    )
 
 
 def test_a_repeat_call_finding_calls_the_compiled_function_twice():
