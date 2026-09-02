@@ -143,10 +143,16 @@ compile-check path/to/file.py [options]
 | `--fp64-oracle` | add an fp64 eager reference run to the numerics oracle, see the blind spot section |
 | `--budget SECONDS` | wall-clock ceiling for the whole run, for CI use |
 | `--baseline FILE` | a stored graph-health baseline, so the graph oracle fails on new breaks rather than on any break |
+| `--no-grad` | skip the backward pass and the grad oracle for this run |
+| `--max-findings N` | cap the findings printed per oracle group; hidden ones are counted (N >= 0) |
+| `--color auto\|always\|never` | colour only on a TTY by default |
 
 Exit codes: `0` clean, `1` at least one finding in a `--fail-on` category, `2` tool
 error (import failure, discovery failure, backend unavailable, model raised in
 eager).
+
+
+Exit-code clauses fixed in M1-3: a compiled lane that raises while eager does not is a divergence and exits 1 regardless of `--fail-on` (an exception belongs to no oracle category); a run without an eager lane exits 2, because there is no reference to be clean against. A failing repeat call is recorded on the backend result but does not move the verdict until the graph oracle (M3) owns repeat-call health.
 
 ## Discovery convention
 
