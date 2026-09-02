@@ -25,7 +25,7 @@ from typing import Any
 
 from compile_check import __version__
 from compile_check.env import probe_apis
-from compile_check.oracles import ORACLES
+from compile_check.oracles import ORACLE_NAMES, ORACLES, Finding, OracleConfig, run_oracles
 
 PROG = "compile-check"
 
@@ -134,7 +134,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_FAIL_ON,
         help=(
             "which oracle categories turn a finding into exit code 1, comma "
-            f"separated from {','.join(ORACLES)} (default: {DEFAULT_FAIL_ON})"
+            f"separated from {','.join(ORACLE_NAMES)} (default: {DEFAULT_FAIL_ON})"
         ),
     )
     parser.add_argument(
@@ -219,13 +219,39 @@ def main(argv: Sequence[str] | None = None) -> int:
     return EXIT_ERROR
 
 
-def run_only(args: argparse.Namespace) -> int:
-    """Run discovery and the runner, print what came back, and stop.
+def parse_fail_on(spec: str) -> list[str]:
+    """Split and check ``--fail-on``, against the real oracle names.
 
-    The developer path behind ``--run-only``: no oracles, no localization, no
-    verdict, so nothing here decides whether a run is clean. Exit 2 means the
-    tool could not get as far as a reference result, which is PLAN.md's rule
-    that a model raising in eager is a tool error.
+    Args:
+        spec: the comma-separated flag value.
+
+    Returns:
+        The requested categories, in the order given, duplicates dropped.
+
+    Raises:
+        ValueError: a category is not one of
+            :data:`compile_check.oracles.ORACLE_NAMES`.
+    """
+    names = list(dict.fromkeys(name.strip() for name in spec.split(",") if name.strip()))
+    unknown = [name for name in names if name not in ORACLE_NAMES]
+    if unknown:
+        raise ValueError(
+            f"unknown --fail-on categor{'ies' if len(unknown) > 1 else 'y'} "
+            f"{', '.join(repr(name) for name in unknown)}; the oracles are "
+            f"{', '.join(ORACLE_NAMES)}"
+        )
+    return names
+
+
+def run_only(args: argparse.Namespace) -> int:
+    """Run discovery, the runner, and the implemented oracles, then stop.
+
+    The developer path behind ``--run-only``: no localization, no report, and no
+    verdict, so nothing here decides whether a run is clean. Findings are
+    printed and deliberately do not change the exit code; that wiring, with
+    ``--fail-on`` deciding exit 1, is the M1-3 main path. Exit 2 means the tool
+    could not get as far as a reference result, which is PLAN.md's rule that a
+    model raising in eager is a tool error.
 
     Nothing here lets a traceback out. A user who typed a backend name wrong
     gets a sentence; the stack that produced it goes to the debug log.
@@ -243,6 +269,12 @@ def run_only(args: argparse.Namespace) -> int:
     from compile_check.runner import RunnerError, run_all, validate_backends, validate_device
 
     backends = [name.strip() for name in args.backends.split(",") if name.strip()]
+    try:
+        # Its own boundary, so that a ValueError out of the run below still
+        # reports as the unexpected error it is rather than as a bad flag.
+        fail_on = parse_fail_on(args.fail_on)
+    except ValueError as exc:
+        return _tool_error(str(exc))
 
     try:
         # Up front, in this order: the flags first, because a typo should be
@@ -259,6 +291,7 @@ def run_only(args: argparse.Namespace) -> int:
             fullgraph=args.fullgraph,
             dynamic=args.dynamic,
             disable_caches=not args.allow_caches,
+            fp64=args.fp64_oracle,
         )
     except (DiscoveryError, RunnerError) as exc:
         # Ours, with a message written for a user: print it as it is.
@@ -270,12 +303,40 @@ def run_only(args: argparse.Namespace) -> int:
         log.debug("the run failed", exc_info=True)
         return _tool_error(f"{type(exc).__name__}: {exc}")
 
-    print(format_run_only(runset))
+    cfg = OracleConfig(
+        rtol=args.rtol,
+        atol=args.atol,
+        fp64=args.fp64_oracle,
+        fp64_reference=runset.fp64,
+    )
+    print(format_run_only(runset, _compare_backends(runset, cfg, fail_on), fail_on=fail_on))
 
     eager = runset.eager
     if eager is not None and not eager.ok:
         return EXIT_ERROR
     return EXIT_OK
+
+
+def _compare_backends(
+    runset: Any,
+    cfg: OracleConfig,
+    fail_on: Sequence[str],
+) -> list[Finding]:
+    """Run the implemented oracles of ``fail_on`` over every non-eager lane.
+
+    Without an eager lane there is nothing to compare against: PLAN.md "Runner
+    semantics" makes eager the reference world, and a run of ``--backends
+    inductor`` alone is a run with no reference, not a clean run.
+    """
+    eager = runset.eager
+    if eager is None:
+        log.warning("no eager lane in this run, so the oracles have no reference to compare with")
+        return []
+    names = [name for name in fail_on if name in ORACLES]
+    findings: list[Finding] = []
+    for result in runset.others:
+        findings.extend(run_oracles(eager, result, cfg, names))
+    return findings
 
 
 def _tool_error(message: str) -> int:
@@ -293,7 +354,12 @@ def _tool_error(message: str) -> int:
     return EXIT_ERROR
 
 
-def format_run_only(runset: Any) -> str:
+def format_run_only(
+    runset: Any,
+    findings: Sequence[Finding] = (),
+    *,
+    fail_on: Sequence[str] = (),
+) -> str:
     """Render a :class:`~compile_check.results.RunSet` for the developer path."""
     env = runset.env
     lines = [
@@ -303,15 +369,34 @@ def format_run_only(runset: Any) -> str:
         f"torch      {env.get('torch_version')} on {env.get('machine')}, "
         f"python {env.get('python_version')}",
         f"caches     force_disable_caches={env.get('inductor_force_disable_caches')}",
+    ]
+    if fail_on:
+        lines.append(f"oracles    {_format_oracles(fail_on)}")
+    lines += [
         "",
         f"{'backend':<28}{'outputs':>8}{'first call':>13}{'second call':>13}  status",
     ]
-    for name, result in runset.results.items():
+    rows = list(runset.results.items())
+    if runset.fp64 is not None:
+        # Labelled as what it is: a reference, not a lane under test.
+        rows.append((f"{runset.fp64.backend} (reference)", runset.fp64))
+    for name, result in rows:
         status = "ok" if result.ok else f"raised {result.exception.type}"
         lines.append(
             f"{name:<28}{len(result.outputs):>8}"
             f"{_seconds(result.first_call_s):>13}{_seconds(result.second_call_s):>13}  {status}"
         )
+
+    lines.append("")
+    lines.append("findings")
+    if runset.eager is None:
+        # Not the same statement as "none": without the reference world nothing
+        # was compared, and a report must not let those two read alike.
+        lines.append("  not checked: this run has no eager lane to compare against")
+    elif not findings:
+        lines.append("  none")
+    else:
+        lines.extend(f"  {_format_finding(finding)}" for finding in findings)
 
     lines.append("")
     lines.append("outputs")
@@ -347,6 +432,27 @@ def format_run_only(runset: Any) -> str:
 def _seconds(value: float | None) -> str:
     """Format a wall time, or a dash when the call did not happen."""
     return "-" if value is None else f"{value:.4f}s"
+
+
+def _format_oracles(fail_on: Sequence[str]) -> str:
+    """Name the requested categories, and which of them do not run yet.
+
+    A category that no oracle implements yet must not read as a category that
+    found nothing, which is the difference between "checked and clean" and "not
+    checked".
+    """
+    live = [name for name in fail_on if name in ORACLES]
+    pending = [name for name in fail_on if name not in ORACLES]
+    text = ", ".join(live) if live else "none implemented yet"
+    if pending:
+        text += f"   (not implemented yet, nothing checked: {', '.join(pending)})"
+    return text
+
+
+def _format_finding(finding: Finding) -> str:
+    """One finding on one line: severity, oracle, which output, message."""
+    index = "-" if finding.output_index is None else str(finding.output_index)
+    return f"[{finding.severity}] {finding.oracle} {finding.backend}[{index}] {finding.message}"
 
 
 def _describe(leaf: Any) -> str:
