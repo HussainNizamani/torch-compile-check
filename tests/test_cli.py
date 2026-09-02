@@ -21,6 +21,7 @@ from compile_check.cli import (
 from compile_check.env import PROBED_APIS
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 PACKAGE_MODULES = [
     "compile_check.cli",
@@ -92,12 +93,12 @@ def test_format_probe_table_two_columns():
 
 def test_unknown_path_exits_two(capsys):
     assert main(["model.py"]) == EXIT_ERROR
-    assert "not implemented in M0" in capsys.readouterr().err
+    assert "not implemented yet" in capsys.readouterr().err
 
 
 def test_no_arguments_exits_two(capsys):
     assert main([]) == EXIT_ERROR
-    assert "not implemented in M0" in capsys.readouterr().err
+    assert "not implemented yet" in capsys.readouterr().err
 
 
 def test_full_v1_flag_surface_parses():
@@ -221,3 +222,40 @@ def test_console_script_is_installed():
     completed = subprocess.run([str(script), "--version"], capture_output=True, text=True)
     assert completed.returncode == 0
     assert completed.stdout.strip() == f"compile-check {__version__}"
+
+
+def test_run_only_is_hidden_from_help():
+    # A developer path, not part of the v1 surface in PLAN.md.
+    assert "--run-only" not in build_parser().format_help()
+    assert build_parser().parse_args(["m.py", "--run-only"]).run_only is True
+
+
+def test_run_only_prints_a_row_and_the_outputs_per_backend(capsys):
+    code = main([str(FIXTURES / "mlp.py"), "--run-only", "--backends", "eager,aot_eager"])
+    out = capsys.readouterr().out
+    assert code == EXIT_OK
+    assert "target     mlp:model" in out
+    assert "eager[0] torch.float32 (4, 4)" in out
+    assert "aot_eager[0] torch.float32 (4, 4)" in out
+    # Both lanes recorded a wall time and the parameter grads.
+    assert out.count("ok") >= 2
+    assert "4 parameters" in out
+
+
+def test_run_only_reports_a_raising_model_as_a_tool_error(capsys):
+    code = main([str(FIXTURES / "raises.py"), "--run-only", "--backends", "eager"])
+    out = capsys.readouterr().out
+    assert code == EXIT_ERROR
+    assert "raised RuntimeError" in out
+    assert "this target is broken on purpose" in out
+
+
+def test_run_only_reports_a_discovery_failure_on_stderr(capsys):
+    code = main([str(FIXTURES / "empty_target.py"), "--run-only"])
+    assert code == EXIT_ERROR
+    assert "no entry point found" in capsys.readouterr().err
+
+
+def test_run_only_without_a_target_is_a_tool_error(capsys):
+    assert main(["--run-only"]) == EXIT_ERROR
+    assert "needs a target" in capsys.readouterr().err
