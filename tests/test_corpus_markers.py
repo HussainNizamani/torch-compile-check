@@ -28,7 +28,10 @@ build, and the half most likely to be wrong.
 
 from __future__ import annotations
 
+import subprocess
+import sys
 import warnings
+from pathlib import Path
 
 import pytest
 import torch
@@ -37,6 +40,7 @@ from cases.markers import CASES, MARKERS, expected_verdict, parse_torch_version
 from cases.summary import CASES_DIR, observe, render_table
 from compile_check.oracles import ORACLE_NAMES
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
 TORCH_VERSION = str(torch.__version__)
 GIT_VERSION = getattr(torch.version, "git_version", "") or ""
 
@@ -81,6 +85,22 @@ def test_the_summary_table_covers_every_case_and_counts_the_agreements():
     # One row per case plus the two header rows, so nothing is silently dropped.
     assert table.count("\n| ") == len(CASES) + 1
     assert f"{len(CASES)} cases:" in table
+
+
+def test_the_summary_module_resolves_the_way_ci_invokes_it():
+    # CI's job-summary step is `python -m cases.summary >> $GITHUB_STEP_SUMMARY`
+    # from the repository root, and the way that breaks is a path one: `cases`
+    # has no __init__.py and resolves only as a namespace package under the
+    # root. Importing it in a fresh interpreter from that directory is the whole
+    # check, and unlike running the module it costs no compiles.
+    completed = subprocess.run(
+        [sys.executable, "-c", "import cases.summary as s; print(s.CASES_DIR)"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert Path(completed.stdout.strip()) == CASES_DIR
 
 
 # --------------------------------------------------------------------------
