@@ -11,11 +11,11 @@ The module is named after the artifact it writes, following PLAN.md "Package
 layout"; the stdlib ``json`` module stays reachable from it because imports are
 absolute.
 
-The schema, version 1, which this docstring commits to and :func:`validate`
+The schema, version 2, which this docstring commits to and :func:`validate`
 enforces::
 
     {
-      "schema_version": 1,
+      "schema_version": 2,
       "tool":        {"name": str, "version": str},
       "target":      {"name": str, "file": str|null,
                       "entry": str|null, "inputs": str|null},
@@ -42,6 +42,7 @@ enforces::
       "verdict":     {"stage": str, "first_divergent_backend": str|null,
                       "summary": str, "note": str|null, "clean": bool,
                       "compared": bool, "backends": [B]},
+      "minimized":   M|null,
       "counts":      {"fail": int, "warn": int, "info": int},
       "exit_code":   int|null
     }
@@ -54,6 +55,20 @@ enforces::
          "explain_error": E|null}
     B = {"backend": str, "fail": int, "warn": int, "info": int,
          "graph_fail": int, "raised": str|null, "raised_on_repeat": str|null}
+    M = {"attempted": bool, "reason": str|null, "summary": str,
+         "reproduced": bool, "changed": bool,
+         "finding": {"oracle": str, "backend": str, "output_index": int|null,
+                     "severity": str, "field": str|null}|null,
+         "shrinks": [{"index": int, "before": [int], "after": [int]}],
+         "stubs": [{"path": str, "module": str}],
+         "kept": [{"path": str, "module": str, "reason": str}],
+         "notes": [str], "steps": int, "seconds": number,
+         "partial": bool, "partial_reason": str|null, "handoff": str}
+
+``minimized`` is version 2's only change, and it is why the version moved:
+``null`` there means ``--minimize`` was not asked for, and a v1 document has no
+such key at all, so a consumer written against one cannot read the other without
+knowing which it has.
 
 Two things are deliberately not in it. There is no timestamp: PLAN.md
 "Cross-architecture parity is a feature" makes parity in v1 "running the tool on
@@ -81,6 +96,7 @@ from typing import Any
 
 from compile_check import __version__
 from compile_check.localize import StageVerdict
+from compile_check.minimize import Minimization
 from compile_check.oracles import DEFAULT_GRAD_TOL_FACTOR, ORACLE_NAMES, SEVERITIES, Finding
 from compile_check.oracles.graph import summarise_reason
 from compile_check.results import BackendResult, CapturedException, GraphHealth, RunSet
@@ -90,8 +106,11 @@ __all__ = ["SCHEMA_VERSION", "build", "dump", "validate"]
 
 log = logging.getLogger("compile_check")
 
-SCHEMA_VERSION = 1
-"""Bumped on any incompatible field change, per PLAN.md "Reports"."""
+SCHEMA_VERSION = 2
+"""Bumped on any incompatible field change, per PLAN.md "Reports".
+
+2 (M3-3) added the top-level ``minimized`` object. 1 was M3-2's first artifact.
+"""
 
 # Wall times are rounded to the same four decimals the terminal report prints.
 # A CI artifact that carried sixteen digits of a number nobody compares would
@@ -120,6 +139,7 @@ def build(
     atol: float | None = None,
     baseline: str | None = None,
     fp64: bool = False,
+    minimized: Minimization | None = None,
     exit_code: int | None = None,
 ) -> dict[str, Any]:
     """Build the JSON document for one run.
@@ -136,6 +156,10 @@ def build(
         atol: ``--atol``, likewise.
         baseline: the ``--baseline`` path, when one was in force.
         fp64: whether ``--fp64-oracle`` added the reference lane.
+        minimized: what ``--minimize`` did, or ``None`` when it was not asked
+            for. The two are different facts and the artifact keeps them apart:
+            ``null`` is "not run", and a record whose ``changed`` is false is
+            "run, and nothing could be reduced".
         exit_code: the code the CLI is about to return, so a CI job reading the
             artifact does not have to re-derive it.
 
@@ -188,6 +212,7 @@ def build(
         "backends": [_backend(name, result, reference) for name, result, reference in lanes],
         "findings": [_finding(finding) for finding in findings],
         "verdict": _verdict(verdict),
+        "minimized": _minimized(minimized),
         "counts": {
             severity: sum(1 for finding in findings if finding.severity == severity)
             for severity in SEVERITIES
@@ -258,6 +283,7 @@ def validate(document: Any) -> list[str]:
             "backends": (list,),
             "findings": (list,),
             "verdict": (dict,),
+            "minimized": (dict, type(None)),
             "counts": (dict,),
             "exit_code": (int, type(None)),
         },
@@ -329,6 +355,7 @@ def validate(document: Any) -> list[str]:
     for index, entry in enumerate(document["findings"]):
         _finding_problems(problems, f"findings[{index}]", entry)
     _verdict_problems(problems, document["verdict"])
+    _minimized_problems(problems, document["minimized"])
     problems.extend(_unserialisable("", document))
     return problems
 
@@ -423,6 +450,54 @@ def _verdict(verdict: StageVerdict) -> dict[str, Any]:
             }
             for entry in verdict.backends
         ],
+    }
+
+
+def _minimized(minimized: Minimization | None) -> dict[str, Any] | None:
+    """What ``--minimize`` did, or ``None`` when it was not asked for.
+
+    The finding is written as its identity rather than as a copy of the entry in
+    ``findings``: an artifact that carried the same message twice would leave a
+    consumer diffing one against the other, and the identity is exactly what
+    :func:`compile_check.minimize.finding_key` kept alive through every
+    candidate.
+    """
+    if minimized is None:
+        return None
+    finding = minimized.finding
+    field_name = finding.details.get("field") if finding is not None else None
+    return {
+        "attempted": minimized.attempted,
+        "reason": minimized.reason,
+        "summary": minimized.summary,
+        "reproduced": minimized.reproduced,
+        "changed": minimized.changed,
+        "finding": (
+            None
+            if finding is None
+            else {
+                "oracle": finding.oracle,
+                "backend": finding.backend,
+                "output_index": finding.output_index,
+                "severity": finding.severity,
+                "field": field_name if isinstance(field_name, str) else None,
+            }
+        ),
+        "shrinks": [
+            {"index": shrink.index, "before": list(shrink.before), "after": list(shrink.after)}
+            for shrink in minimized.shrinks
+        ],
+        "stubs": [{"path": stub.path, "module": stub.module} for stub in minimized.stubs],
+        "kept": [
+            {"path": kept.path, "module": kept.module, "reason": kept.reason}
+            for kept in minimized.kept
+        ],
+        "notes": list(minimized.notes),
+        "steps": minimized.steps,
+        "seconds": round(minimized.seconds, _TIME_DIGITS),
+        "partial": minimized.partial,
+        "partial_reason": minimized.partial_reason,
+        "handoff": minimized.handoff,
     }
 
 
@@ -572,6 +647,65 @@ def _verdict_problems(problems: list[str], verdict: Any) -> None:
                 "raised_on_repeat": (str, type(None)),
             },
         )
+
+
+def _minimized_problems(problems: list[str], minimized: Any) -> None:
+    """The ``minimized`` object, when there is one.
+
+    ``None`` is valid and means the minimizer was not run, so it is checked and
+    then left alone; everything else is checked field by field, including the
+    three arrays, because a consumer that reads ``stubs`` expects entries it can
+    index by name.
+    """
+    if minimized is None:
+        return
+    _fields(
+        problems,
+        "minimized.",
+        minimized,
+        {
+            "attempted": (bool,),
+            "reason": (str, type(None)),
+            "summary": (str,),
+            "reproduced": (bool,),
+            "changed": (bool,),
+            "finding": (dict, type(None)),
+            "shrinks": (list,),
+            "stubs": (list,),
+            "kept": (list,),
+            "notes": (list,),
+            "steps": (int,),
+            "seconds": (int, float),
+            "partial": (bool,),
+            "partial_reason": (str, type(None)),
+            "handoff": (str,),
+        },
+    )
+    if not isinstance(minimized, dict):
+        return
+    if isinstance(minimized.get("finding"), dict):
+        _fields(
+            problems,
+            "minimized.finding.",
+            minimized["finding"],
+            {
+                "oracle": (str,),
+                "backend": (str,),
+                "output_index": (int, type(None)),
+                "severity": (str,),
+                "field": (str, type(None)),
+            },
+        )
+    for name, expected in (
+        ("shrinks", {"index": (int,), "before": (list,), "after": (list,)}),
+        ("stubs", {"path": (str,), "module": (str,)}),
+        ("kept", {"path": (str,), "module": (str,), "reason": (str,)}),
+    ):
+        entries = minimized.get(name)
+        if not isinstance(entries, list):
+            continue
+        for index, entry in enumerate(entries):
+            _fields(problems, f"minimized.{name}[{index}].", entry, expected)
 
 
 def _unserialisable(prefix: str, value: Any) -> list[str]:

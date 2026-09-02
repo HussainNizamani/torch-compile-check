@@ -44,6 +44,7 @@ from typing import Any
 
 from compile_check import __version__
 from compile_check.localize import StageVerdict
+from compile_check.minimize import Minimization
 from compile_check.oracles import ORACLE_NAMES, Finding
 from compile_check.report import repro as repro_source
 from compile_check.results import RunSet
@@ -92,6 +93,7 @@ def emit(
     verdict: StageVerdict,
     *,
     standalone: bool = True,
+    minimized: Minimization | None = None,
 ) -> str | None:
     """Emit the top finding as a regression test.
 
@@ -105,6 +107,12 @@ def emit(
             alone, for a report that has already quoted the target above it,
             which is what the Markdown draft wants: the same code twice in one
             issue is one copy a reader has to diff against the other.
+        minimized: what ``--minimize`` reduced the case to, when it ran. The
+            emitted test then exercises the *minimized* target -- the shrunk
+            inputs in the factory, the stubbed children at the top of the method
+            -- because that is the case the tool actually checked still
+            reproduces, and a test carrying a model whose blocks were shown to
+            be irrelevant is a bigger test than the report earned.
 
     Returns:
         The test's source, or ``None`` when there is nothing to test: a clean
@@ -123,14 +131,60 @@ def emit(
         log.debug("nothing to emit: the target's source is not available to inline")
         return None
 
+    # Only a minimization that was aimed at *this* finding may change the file:
+    # a record for another finding, or one whose control re-run did not
+    # reproduce, describes a case this test is not about.
+    reduction = _usable(minimized, finding)
     if finding is not None:
         lane = finding.backend
-        body = _body(runset, repro, finding, lane)
+        body = _stub_lines(repro, reduction) + _body(runset, repro, finding, lane)
     else:
         assert raised is not None  # the pair above is exhaustive
         lane, why = raised
         body = _raised_body(repro, lane, why)
-    return _file(runset, repro, finding, lane, body, standalone)
+    return _file(runset, repro, finding, lane, body, standalone, reduction)
+
+
+def _usable(minimized: Minimization | None, finding: Finding | None) -> Minimization | None:
+    """The minimization this emitted test may be written from, or ``None``.
+
+    Three ways it is not usable, and each would otherwise put something in the
+    file that the tool did not check: no minimization ran, it ran against a
+    different finding, or its control re-run did not reproduce and so nothing
+    was minimized at all.
+    """
+    if minimized is None or finding is None or not minimized.reproduced:
+        return None
+    if minimized.finding is not finding:
+        log.debug("not using a minimization aimed at another finding")
+        return None
+    return minimized if minimized.changed else None
+
+
+def _stub_lines(repro: repro_source.Repro, minimized: Minimization | None) -> list[str]:
+    """The child replacements, as the first statements of the test method.
+
+    In the method rather than beside the target, because the method body is what
+    PLAN.md "Regression test emission" says gets lifted into
+    ``test/inductor/test_torchinductor.py``, and a maintainer who pastes it must
+    get the model the finding was minimized to rather than the whole one.
+    """
+    if minimized is None or not minimized.stubs:
+        return []
+    entry = repro.entry
+    lines = [
+        f"# compile-check replaced {len(minimized.stubs)} child module"
+        f"{'' if len(minimized.stubs) == 1 else 's'} with a passthrough; it still reproduced."
+    ]
+    for stub in minimized.stubs:
+        parent, _, name = stub.path.rpartition(".")
+        owner = f'{entry}.get_submodule("{parent}")' if parent else str(entry)
+        lines.append(
+            f"{owner}.{name} = torch.nn.Identity()  # was {stub.module}"
+            if name.isidentifier()
+            else f'setattr({owner}, "{name}", torch.nn.Identity())  # was {stub.module}'
+        )
+    return lines
 
 
 def _file(
@@ -140,6 +194,7 @@ def _file(
     lane: str,
     body: list[str],
     standalone: bool,
+    minimized: Minimization | None = None,
 ) -> str:
     """The whole file: docstring, imports, the target, and the test class.
 
@@ -152,7 +207,7 @@ def _file(
     if standalone:
         definitions.append(repro.body_without_inputs if repro.inputs_expr else repro.body)
     if repro.inputs_expr:
-        definitions.append(_factory(repro))
+        definitions.append(_factory(repro, minimized))
     definitions.append(_test_class(runset, repro, finding, lane, body))
 
     if not standalone:
@@ -167,7 +222,7 @@ def _file(
         # even when the target file did not import it under that name.
         third_party.insert(0, "import torch")
     groups = [
-        _docstring(runset, repro, finding, lane),
+        _docstring(runset, repro, finding, lane, minimized),
         "\n".join(repro.future_imports),
         "import unittest",
         "\n".join(third_party),
@@ -182,6 +237,7 @@ def _docstring(
     repro: repro_source.Repro,
     finding: Finding | None,
     lane: str,
+    minimized: Minimization | None = None,
 ) -> str:
     """The file's own header: what it came from, and what it is not."""
     env = runset.env
@@ -216,6 +272,14 @@ def _docstring(
             "The target's whole file is inlined below: its entry point or its inputs are not",
             "bound by a plain top-level statement, so the pieces could not be isolated.",
         ]
+    if minimized is not None:
+        lines += [
+            "",
+            f"Minimized: {minimized.summary}.",
+            "The factory and the first statements of the method carry the reduction; the target",
+            "below is the original, so the difference between them is what compile-check showed",
+            "the finding does not need.",
+        ]
     lines += [
         "",
         "It is half-written rather than ready. Check that the assertion says what you mean",
@@ -225,21 +289,45 @@ def _docstring(
     return "\n".join(lines)
 
 
-def _factory(repro: repro_source.Repro) -> str:
+def _factory(repro: repro_source.Repro, minimized: Minimization | None = None) -> str:
     """The input factory, so that each lane gets inputs of its own.
 
     PLAN.md "Runner semantics" clones the inputs per backend, and a test that
     did not would compare a compiled call against an eager call that had already
     mutated what it was given -- which is exactly the class of bug the alias
     oracle exists for.
+
+    A minimized run writes the shrunk inputs here rather than editing the user's
+    own expression, which the tool has no safe way to rewrite. The slicing goes
+    through ``tree_flatten`` because that is the flattening the runner indexed
+    the leaves with (:mod:`compile_check.minimize` shrinks the same list), so
+    the leaf a shrink names is the leaf the test slices whatever shape the
+    inputs are -- a tuple, a dict, or anything nested.
     """
-    return "\n".join(
-        [
-            "def make_inputs():",
-            '    """A fresh set per lane, as the runner gives each backend its own clone."""',
-            f"    return {_reindent(repro.inputs_expr or '()')}",
-        ]
+    expression = _reindent(repro.inputs_expr or "()")
+    if minimized is None or not minimized.shrinks:
+        return "\n".join(
+            [
+                "def make_inputs():",
+                '    """A fresh set per lane, as the runner gives each backend its own clone."""',
+                f"    return {expression}",
+            ]
+        )
+    shrunk = ", ".join(
+        f"leaf {shrink.index} {shrink.before} -> {shrink.after}" for shrink in minimized.shrinks
     )
+    lines = [
+        "def make_inputs():",
+        '    """A fresh set per lane, minimized by compile-check.',
+        "",
+        f"    Shrunk along the leading dimension, and it still reproduced: {shrunk}.",
+        '    """',
+        f"    leaves, spec = torch.utils._pytree.tree_flatten({expression})",
+    ]
+    for shrink in minimized.shrinks:
+        lines.append(f"    leaves[{shrink.index}] = leaves[{shrink.index}][:{shrink.after[0]}]")
+    lines.append("    return torch.utils._pytree.tree_unflatten(leaves, spec)")
+    return "\n".join(lines)
 
 
 def _reindent(expression: str) -> str:

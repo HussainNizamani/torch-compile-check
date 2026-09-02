@@ -22,10 +22,13 @@ divergence appears is not always where the fix belongs" verbatim from the
 verdict, because a maintainer reading "the bug is in inductor" from a tool that
 ran three backends would be right to stop reading.
 
-It does not minimize. Until M3-3 lands the repro is the target's own source,
+It says whether it minimized. The repro block is the target's own source,
 reduced to the statements the entry point and the inputs need
-(:mod:`compile_check.report.repro`), and the draft says so rather than
-presenting a whole file as a minimal reproducer.
+(:mod:`compile_check.report.repro`), which is a *shorter* file and not a
+*smaller case*. ``--minimize`` is what makes the case smaller, and the draft
+either carries the "Minimized" section that says what was removed or says the
+flag was not passed, so a maintainer is never left to assume a reproducer is
+minimal because a tool produced it.
 
 Nothing here imports torch.
 """
@@ -38,6 +41,7 @@ from typing import Any
 
 from compile_check import __version__
 from compile_check.localize import MODEL, NO_REFERENCE, StageVerdict
+from compile_check.minimize import Minimization
 from compile_check.oracles import DEFAULT_GRAD_TOL_FACTOR, ORACLE_NAMES, Finding
 from compile_check.report import repro as repro_source
 from compile_check.report.pytest_case import emit, select
@@ -70,6 +74,7 @@ def render(
     grad_tol_factor: float = DEFAULT_GRAD_TOL_FACTOR,
     baseline: str | None = None,
     max_findings: int = DEFAULT_MAX_FINDINGS,
+    minimized: Minimization | None = None,
 ) -> str:
     """Render a run as a Markdown issue draft.
 
@@ -83,6 +88,9 @@ def render(
         grad_tol_factor: ``--grad-tol-factor``, for the environment block.
         baseline: the ``--baseline`` path, when one was in force.
         max_findings: how many findings to list. The rest are counted.
+        minimized: what ``--minimize`` did, or ``None`` when it was not asked
+            for. It changes two things: the repro block says whether the case
+            was reduced, and a "Minimized" section lists what was removed.
 
     Returns:
         The draft, ready to write. The first line is the issue title.
@@ -91,12 +99,13 @@ def render(
     blocks = [
         f"# {title(runset, findings, verdict)}",
         _preamble(runset, verdict, findings),
-        _repro(runset, repro),
+        _repro(runset, repro, minimized),
+        _minimized(minimized),
         _findings(findings, max_findings),
         _stage(verdict),
-        _test(runset, findings, verdict),
+        _test(runset, findings, verdict, minimized),
         _environment(runset, grad_tol_factor, baseline),
-        _command(runset, fail_on, baseline),
+        _command(runset, fail_on, baseline, minimized),
     ]
     return "\n\n".join(block for block in blocks if block) + "\n"
 
@@ -214,7 +223,11 @@ def _count_phrase(fails: int, total: int) -> str:
     return f"The oracles reported {findings}, {fails} of them fail-severity."
 
 
-def _repro(runset: RunSet, repro: repro_source.Repro | None) -> str:
+def _repro(
+    runset: RunSet,
+    repro: repro_source.Repro | None,
+    minimized: Minimization | None = None,
+) -> str:
     """The reproducer: the target's own source, and how the two lanes were run."""
     if repro is None:
         return (
@@ -238,13 +251,65 @@ def _repro(runset: RunSet, repro: repro_source.Repro | None) -> str:
         [
             "## Repro",
             "",
-            f"{note} It is not a *minimized* repro: the minimizer lands in M3-3.",
+            f"{note} {_minimality(minimized)}",
             "",
             "```python",
             *code,
             "```",
         ]
     )
+
+
+def _minimality(minimized: Minimization | None) -> str:
+    """Whether the block above is a minimized case, in one sentence.
+
+    The distinction the section's docstring is about: this block is always the
+    *whole* target, because a reader has to be able to run it. What ``--minimize``
+    established is which parts of it the finding does not need, and that is the
+    section below rather than an edit to the code above.
+    """
+    if minimized is None:
+        return "It is the whole case: run compile-check again with `--minimize` to shrink it."
+    if minimized.finding is None or not minimized.reproduced or not minimized.changed:
+        return f"It is the whole case: `--minimize` {minimized.summary}."
+    return (
+        "It is the whole case; the **Minimized** section below says which parts of it the "
+        "finding does not need."
+    )
+
+
+def _minimized(minimized: Minimization | None) -> str:
+    """What ``--minimize`` reduced the case to, for the maintainer who triages it.
+
+    Written as prose and a list rather than as a diff, because the reduction is
+    two statements about the original -- these children are not needed, these
+    inputs can be this small -- and a maintainer acts on those before they act
+    on a patch.
+    """
+    if minimized is None or minimized.finding is None:
+        return ""
+    lines = ["## Minimized", "", _sentence(minimized.summary)]
+    if not minimized.reproduced:
+        lines += ["", *[f"- {note}" for note in minimized.notes]]
+        return "\n".join(lines)
+
+    bullets = [f"- input leaf {s.index}: `{s.before}` -> `{s.after}`" for s in minimized.shrinks]
+    bullets += [
+        f"- `{stub.path}` ({stub.module}) replaced with `torch.nn.Identity()`"
+        for stub in minimized.stubs
+    ]
+    bullets += [f"- kept `{k.path}` ({k.module}): {k.reason}" for k in minimized.kept]
+    bullets += [f"- {note}" for note in minimized.notes]
+    if bullets:
+        lines += ["", *bullets]
+    if minimized.partial and minimized.partial_reason is not None:
+        lines += [
+            "",
+            f"This reduction is **partial**: {minimized.partial_reason}. What is left still "
+            "reproduces, and there may be more to remove.",
+        ]
+    lines += ["", minimized.handoff]
+    return "\n".join(lines)
 
 
 def _driver(runset: RunSet, repro: repro_source.Repro) -> str:
@@ -321,7 +386,12 @@ def _stage(verdict: StageVerdict) -> str:
     return "\n".join(lines)
 
 
-def _test(runset: RunSet, findings: Sequence[Finding], verdict: StageVerdict) -> str:
+def _test(
+    runset: RunSet,
+    findings: Sequence[Finding],
+    verdict: StageVerdict,
+    minimized: Minimization | None = None,
+) -> str:
     """The regression test, if there is a finding to write one from.
 
     PLAN.md "Regression test emission": when a maintainer accepts a bug report,
@@ -331,7 +401,7 @@ def _test(runset: RunSet, findings: Sequence[Finding], verdict: StageVerdict) ->
     # Not the standalone file: the target is already quoted in the repro block
     # above, and an issue that carried it twice would leave a reader diffing one
     # copy against the other.
-    case = emit(runset, findings, verdict, standalone=False)
+    case = emit(runset, findings, verdict, standalone=False, minimized=minimized)
     if case is None:
         return ""
     return "\n".join(
@@ -387,7 +457,12 @@ def _environment(runset: RunSet, grad_tol_factor: float, baseline: str | None) -
     return "\n".join(lines)
 
 
-def _command(runset: RunSet, fail_on: Sequence[str], baseline: str | None) -> str:
+def _command(
+    runset: RunSet,
+    fail_on: Sequence[str],
+    baseline: str | None,
+    minimized: Minimization | None = None,
+) -> str:
     """The command that produced this, so a reader can run it themselves."""
     source = runset.target_source
     target = _short(source.file) if source is not None else None
@@ -407,6 +482,8 @@ def _command(runset: RunSet, fail_on: Sequence[str], baseline: str | None) -> st
         parts += ["--fail-on", ",".join(fail_on)]
     if baseline is not None:
         parts += ["--baseline", baseline]
+    if minimized is not None:
+        parts.append("--minimize")
     if runset.seed != 0:
         parts += ["--seed", str(runset.seed)]
     return "\n".join(["## How this was produced", "", "```console", f"$ {' '.join(parts)}", "```"])
