@@ -125,3 +125,21 @@ does not fail) instead of a tool error, with the summary row noting
 a green job that checked nothing is worse than a red one that says so. Once
 M1-3 lands, drop `allow-unimplemented` (or leave it `false`) to get a real
 check with no other change to your workflow.
+
+## What the self-test workflow does and does not cover
+
+`.github/workflows/action-selftest.yml` runs the action against this
+repository's own checkout on every push and pull request that touches
+`action/`. Its `selftest` job uses `source: auto`, which — running inside a
+checkout of the action's own repository — always resolves to the
+checked-out-source install, never to `git+https://...`, the path an external
+consumer's workflow actually exercises. A second job,
+`selftest-git-source`, forces `source: git` to test that path directly, and
+is expected to fail while this repository is private: pip cannot clone a
+private repository without credentials, and the action does not supply one.
+That job runs with `continue-on-error: true` so the gap shows up as a red job
+with a stated reason in the job list, rather than as a green `selftest` job
+that never actually ran the install path a real external user depends on.
+Once the repository is public, or `compile-check` ships on PyPI and `source:
+auto` resolves external consumers there instead, `selftest-git-source` is
+expected to turn green with no other change.

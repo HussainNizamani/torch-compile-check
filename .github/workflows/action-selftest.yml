@@ -63,7 +63,7 @@ jobs:
       - name: Install torch and compile-check directly
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "torch>=2.4"
+          python -m pip install "torch>=2.4" --index-url https://download.pytorch.org/whl/cpu
           python -m pip install -e ".[dev]"
 
       - name: --version
@@ -74,3 +74,34 @@ jobs:
 
       - name: --run-only against the reference fixture
         run: compile-check tests/fixtures/mlp.py --run-only
+
+  selftest-git-source:
+    # A second self-test job, deliberately separate from `selftest` above:
+    # that job's default `source: auto` resolves to `local` (the action runs
+    # inside a checkout of its own repo, so the checked-out-source install
+    # always wins per PLAN.md "GitHub Action") and never actually exercises
+    # `source: git`, the path an external consumer's workflow uses. Forcing
+    # `source: git` here is the only way this workflow tests that path at
+    # all -- and, while this repository is private, it is expected to fail:
+    # pip cannot `git+https://` clone a private repo without credentials
+    # (docs/action.md "Inputs", the `source` row), and this action does not
+    # pass one in. `continue-on-error: true` on the job keeps that a visible,
+    # documented gap in the job list -- a red job with a stated reason --
+    # rather than a green job that quietly never ran the path it claims to
+    # test. Once the repository is public, or the package is on PyPI and
+    # `source: auto` resolves external consumers there instead, this job is
+    # expected to turn green with no other change, and `continue-on-error`
+    # should come off then.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run the composite action with source forced to git
+        uses: ./action
+        with:
+          source: git
+          ref: ${{ github.sha }}
+          targets: "tests/fixtures/mlp.py"
+          allow-unimplemented: "true"
