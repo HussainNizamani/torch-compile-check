@@ -9,15 +9,16 @@ checks one clause of that contract.
 Two names, deliberately not one. :data:`ORACLE_NAMES` is the ``--fail-on``
 vocabulary from PLAN.md "CLI surface for v1", which is fixed at five for v1 and
 is what a typo is checked against; :data:`ORACLES` is the registry of the
-oracles that actually run today, so an M1 build reports on what M1 implements
-without the CLI having to hard-code a second list. The two converge when M2 and
-M3 land alias, grad, and graph.
+oracles that actually run today, so a build reports on what it implements
+without the CLI having to hard-code a second list. The two converge when M2-2
+and M3 land grad and graph.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 
+from compile_check.oracles.alias import AliasOracle
 from compile_check.oracles.base import (
     SEVERITIES,
     Finding,
@@ -43,11 +44,12 @@ __all__ = [
 # The --fail-on vocabulary, in the order PLAN.md "Oracles" lists them.
 ORACLE_NAMES: tuple[str, ...] = ("numerics", "alias", "metadata", "grad", "graph")
 
-# The oracles a run can actually use, keyed by their --fail-on name. alias and
-# grad land in M2, graph in M3; until then a --fail-on naming them parses and is
+# The oracles a run can actually use, keyed by their --fail-on name. grad lands
+# in M2-2 and graph in M3; until then a --fail-on naming them parses and is
 # reported as not yet running rather than silently passing.
 ORACLES: dict[str, Oracle] = {
     "numerics": NumericsOracle(),
+    "alias": AliasOracle(),
     "metadata": MetadataOracle(),
 }
 

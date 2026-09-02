@@ -79,6 +79,10 @@ _DETAIL_ORDER: tuple[str, ...] = (
     "expected_count",
     "got_count",
     "verdict",
+    # The alias oracle's context: the reference relation first, as everywhere
+    # else in the report, so the pair reads in the order the comparison ran.
+    "eager_relation",
+    "compiled_relation",
 )
 
 # Already said in the finding's own message; repeating it would double the
