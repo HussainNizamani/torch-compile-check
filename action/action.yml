@@ -1,0 +1,194 @@
+name: "compile-check"
+description: >-
+  Differential testing for torch.compile: run declared entrypoints under
+  eager and compiled backends and fail the job when compilation changes the
+  answer. See docs/action.md.
+author: "HussainNizamani"
+
+# PLAN.md "GitHub Action": a composite action published from action/. Inputs
+# and outputs mirror the compile-check CLI surface (src/compile_check/cli.py)
+# one to one, so the mapping never needs its own separate documentation.
+inputs:
+  targets:
+    description: >-
+      Newline-separated list of targets to check, each
+      "path[:entry][:inputs]" (PLAN.md "Discovery convention"). Required:
+      at least one target.
+    required: true
+  backends:
+    description: >-
+      Comma-separated backends to run, forwarded to --backends.
+    required: false
+    default: "eager,aot_eager,inductor"
+  fail-on:
+    description: >-
+      Comma-separated oracle categories that turn a finding into a failing
+      step, forwarded to --fail-on.
+    required: false
+    default: "numerics,alias,metadata,grad"
+  torch:
+    description: >-
+      Which torch build to install: "stable" (PyPI), "nightly" (CPU
+      nightly index), or an explicit pip requirement spec (e.g.
+      "torch==2.5.0").
+    required: false
+    default: "stable"
+  python-version:
+    description: "Python version for actions/setup-python."
+    required: false
+    default: "3.12"
+  baseline:
+    description: >-
+      Path to a stored graph-health baseline JSON. When set, forwarded as
+      --baseline so the graph oracle fails on new breaks only (PLAN.md
+      "GitHub Action").
+    required: false
+    default: ""
+  budget:
+    description: "Wall-clock ceiling in seconds, forwarded to --budget."
+    required: false
+    default: ""
+  json-out:
+    description: >-
+      Path to write the combined JSON results to. Also exposed as the
+      json-path output.
+    required: false
+    default: "compile-check-results.json"
+  extra-args:
+    description: "Extra arguments appended verbatim to every invocation."
+    required: false
+    default: ""
+  ref:
+    description: >-
+      Git ref of HussainNizamani/compile-check to install from, until the
+      package is on PyPI.
+    required: false
+    default: "main"
+  allow-unimplemented:
+    description: >-
+      Today the CLI's main run path is not implemented yet (it lands in
+      M1-3) and exits 2 with a fixed message. When true, that specific exit
+      is treated as neutral (the step does not fail) instead of an error, so
+      an action pinned to `ref: main` before M1-3 lands does not red every
+      job in a consuming repository. Default false: an unimplemented run is
+      a real failure, since a green job that checked nothing is worse than a
+      red one that says so.
+    required: false
+    default: "false"
+
+outputs:
+  exit-code:
+    description: >-
+      The worst exit code across all targets (0 clean, 1 finding, 2 tool
+      error; see src/compile_check/cli.py exit codes).
+    value: ${{ steps.run.outputs.exit-code }}
+  json-path:
+    description: "Path to the combined JSON results file."
+    value: ${{ steps.run.outputs.json-path }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install torch
+      shell: bash
+      run: |
+        set -euo pipefail
+        case "${{ inputs.torch }}" in
+          stable)
+            python -m pip install --upgrade pip
+            python -m pip install "torch>=2.4"
+            ;;
+          nightly)
+            python -m pip install --upgrade pip
+            python -m pip install --pre torch \
+              --index-url https://download.pytorch.org/whl/nightly/cpu
+            ;;
+          *)
+            python -m pip install --upgrade pip
+            python -m pip install "${{ inputs.torch }}"
+            ;;
+        esac
+
+    - name: Install compile-check
+      shell: bash
+      run: |
+        set -euo pipefail
+        python -m pip install "git+https://github.com/HussainNizamani/compile-check@${{ inputs.ref }}"
+
+    - name: Run compile-check
+      id: run
+      shell: bash
+      # PLAN.md "GitHub Action": disable compile caches by default so a run
+      # measures the current compiler; loop over targets, collect the worst
+      # exit code, write a job summary row per target, and degrade honestly
+      # while the CLI main path is not implemented (M1-3).
+      env:
+        TARGETS: ${{ inputs.targets }}
+        BACKENDS: ${{ inputs.backends }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        BASELINE: ${{ inputs.baseline }}
+        BUDGET: ${{ inputs.budget }}
+        JSON_OUT: ${{ inputs.json-out }}
+        EXTRA_ARGS: ${{ inputs.extra-args }}
+        ALLOW_UNIMPLEMENTED: ${{ inputs.allow-unimplemented }}
+      run: |
+        set -uo pipefail
+
+        worst=0
+        summary_rows=()
+        json_paths=()
+        index=0
+
+        {
+          echo "## compile-check results"
+          echo
+          echo "| target | exit code | status |"
+          echo "|---|---|---|"
+        } >>"$GITHUB_STEP_SUMMARY"
+
+        while IFS= read -r target; do
+          [ -z "$target" ] && continue
+          index=$((index + 1))
+
+          target_json="${JSON_OUT%.json}.${index}.json"
+          json_paths+=("$target_json")
+
+          args=(compile-check "$target" --backends "$BACKENDS" --fail-on "$FAIL_ON" --json "$target_json")
+          [ -n "$BASELINE" ] && args+=(--baseline "$BASELINE")
+          [ -n "$BUDGET" ] && args+=(--budget "$BUDGET")
+          # shellcheck disable=SC2206
+          [ -n "$EXTRA_ARGS" ] && args+=($EXTRA_ARGS)
+
+          set +e
+          output="$("${args[@]}" 2>&1)"
+          code=$?
+          set -e
+
+          echo "$output"
+
+          if [ "$code" -eq 2 ] && printf '%s' "$output" | grep -q "not implemented"; then
+            status="not implemented (compile-check main path lands in M1-3)"
+            if [ "$ALLOW_UNIMPLEMENTED" = "true" ]; then
+              row_code=0
+            else
+              row_code=2
+              worst=2
+            fi
+          else
+            status="exit $code"
+            row_code=$code
+            [ "$code" -gt "$worst" ] && worst=$code
+          fi
+
+          echo "| \`$target\` | $row_code | $status |" >>"$GITHUB_STEP_SUMMARY"
+        done <<<"$TARGETS"
+
+        echo "exit-code=$worst" >>"$GITHUB_OUTPUT"
+        echo "json-path=${JSON_OUT}" >>"$GITHUB_OUTPUT"
+
+        exit "$worst"

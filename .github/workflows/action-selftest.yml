@@ -1,0 +1,76 @@
+name: action self-test
+
+# Smoke-tests the composite action in action/action.yml against this same
+# repository's checkout, so a change to the action is exercised on every
+# push/PR without waiting for a consumer repository. PLAN.md "GitHub
+# Action": until M1-3 lands the CLI main path, the tool exits 2 with
+# "not implemented" on any real target, so allow-unimplemented is set here
+# and the smoke checks lean on --version/--probe/--run-only instead
+# (src/compile_check/cli.py).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "action/**"
+      - ".github/workflows/action-selftest.yml"
+  pull_request:
+    paths:
+      - "action/**"
+      - ".github/workflows/action-selftest.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run the composite action against this checkout
+        id: check
+        uses: ./action
+        with:
+          # ref: main would install from GitHub instead of this checkout's
+          # working copy, which defeats the point of a self-test on a PR
+          # branch; pin the ref to the commit under test instead.
+          ref: ${{ github.sha }}
+          targets: "tests/fixtures/mlp.py"
+          allow-unimplemented: "true"
+
+      - name: Assert the action reported neutrally
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.check.outputs.exit-code }}" != "0" ]; then
+            echo "expected exit-code 0 (allow-unimplemented), got ${{ steps.check.outputs.exit-code }}" >&2
+            exit 1
+          fi
+          echo "json-path output: ${{ steps.check.outputs.json-path }}"
+
+      - name: Set up Python for the direct CLI smoke checks
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install torch and compile-check directly
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "torch>=2.4"
+          python -m pip install -e ".[dev]"
+
+      - name: --version
+        run: compile-check --version
+
+      - name: --probe
+        run: compile-check --probe
+
+      - name: --run-only against the reference fixture
+        run: compile-check tests/fixtures/mlp.py --run-only

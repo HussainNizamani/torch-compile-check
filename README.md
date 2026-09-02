@@ -73,6 +73,22 @@ knowing before you point the tool at something:
 Both happen in the `compile-check` process only. Nothing is written to your project,
 and nothing outlives the command.
 
+## Use it in CI
+
+A composite GitHub Action lives in [`action/`](action/action.yml):
+
+```yaml
+- uses: HussainNizamani/compile-check/action@main
+  with:
+    targets: models/classifier.py
+```
+
+It installs `compile-check`, runs it against the entrypoints you declare, and
+fails the job on the configured `--fail-on` categories. See
+[docs/action.md](docs/action.md) for the full inputs/outputs reference,
+baseline semantics, and the note on how it degrades honestly before M1-3
+lands the CLI's main run path.
+
 ## Blind spot, stated up front
 
 Eager is the reference, so any bug that lives in eager is invisible to this tool. If
