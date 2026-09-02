@@ -33,9 +33,10 @@ from typing import Any
 
 from compile_check import __version__
 from compile_check.env import probe_apis
-from compile_check.localize import localize
+from compile_check.localize import StageVerdict, localize
 from compile_check.oracles import ORACLE_NAMES, ORACLES, Finding, OracleConfig, run_oracles
 from compile_check.report.terminal import DEFAULT_MAX_FINDINGS, render
+from compile_check.results import RunSet
 
 PROG = "compile-check"
 
@@ -349,7 +350,7 @@ def run(args: argparse.Namespace) -> int:
 
 def _exit_code(
     findings: Sequence[Finding],
-    verdict: Any,
+    verdict: StageVerdict,
     fail_on: Sequence[str],
 ) -> int:
     """PLAN.md "CLI surface for v1" exit codes, decided in one place.
@@ -395,7 +396,7 @@ def _use_color(choice: str) -> bool:
     return sys.stdout.isatty() and not os.environ.get("NO_COLOR")
 
 
-def _guarded_run(args: argparse.Namespace) -> tuple[Any | None, list[str]]:
+def _guarded_run(args: argparse.Namespace) -> tuple[RunSet | None, list[str]]:
     """Validate the flags, load the target, and run every backend.
 
     M1-1 review carry-over (0): the main path and ``--run-only`` share one
@@ -507,7 +508,7 @@ def run_only(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def _compare_backends(runset: Any, cfg: OracleConfig) -> list[Finding]:
+def _compare_backends(runset: RunSet, cfg: OracleConfig) -> list[Finding]:
     """Run every implemented oracle over every non-eager lane.
 
     Every oracle runs on every run, whatever ``--fail-on`` says. The flag
@@ -546,7 +547,7 @@ def _tool_error(message: str) -> int:
 
 
 def format_run_only(
-    runset: Any,
+    runset: RunSet,
     findings: Sequence[Finding] = (),
     *,
     fail_on: Sequence[str] = (),
@@ -575,7 +576,9 @@ def format_run_only(
         # Labelled as what it is: a reference, not a lane under test.
         rows.append((f"{runset.fp64.backend} (reference)", runset.fp64))
     for name, result in rows:
-        status = "ok" if result.ok else f"raised {result.exception.type}"
+        # `result.exception is None` rather than `result.ok`: the property says
+        # the same thing, but a reader that narrows types cannot see through it.
+        status = "ok" if result.exception is None else f"raised {result.exception.type}"
         lines.append(
             f"{name:<28}{len(result.outputs):>8}"
             f"{_seconds(result.first_call_s):>13}{_seconds(result.second_call_s):>13}  {status}"
