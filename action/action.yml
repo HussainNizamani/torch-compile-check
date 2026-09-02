@@ -87,13 +87,17 @@ inputs:
     default: "auto"
   allow-unimplemented:
     description: >-
-      Today the CLI's main run path is not implemented yet (it lands in
-      M1-3) and exits 2 with a fixed message. When true, that specific exit
-      is treated as neutral (the step does not fail) instead of an error, so
-      an action pinned to `ref: main` before M1-3 lands does not red every
-      job in a consuming repository. Default false: an unimplemented run is
-      a real failure, since a green job that checked nothing is worse than a
-      red one that says so.
+      Backward compatibility for a `ref` pinned to a commit before M1-3
+      (PR #6): on such a ref, the CLI's main run path is not implemented
+      and exits 2 with a fixed "not implemented" message for any real
+      target. When true, that specific exit is treated as neutral (the
+      step does not fail) instead of an error, so a workflow pinned to a
+      pre-M1-3 `ref` does not red every job in a consuming repository. A
+      `ref` at or after M1-3 (including the default, `main`) never takes
+      this path -- `compile-check <target>` runs for real and exits 0, 1,
+      or 2 on its own terms. Default false: an unimplemented run is a real
+      failure, since a green job that checked nothing is worse than a red
+      one that says so.
     required: false
     default: "false"
 
@@ -174,7 +178,8 @@ runs:
       # PLAN.md "GitHub Action": disable compile caches by default so a run
       # measures the current compiler; loop over targets, collect the worst
       # exit code, write a job summary row per target, and degrade honestly
-      # while the CLI main path is not implemented (M1-3).
+      # on a pre-M1-3 ref, where the CLI main path is not implemented yet
+      # (see the allow-unimplemented input; main is past M1-3 already).
       env:
         TARGETS: ${{ inputs.targets }}
         BACKENDS: ${{ inputs.backends }}
@@ -229,7 +234,7 @@ runs:
           stage="$(printf '%s\n' "$output" | grep -m1 -E '^[[:space:]]*(first diverges at|clean:)' | sed 's/^[[:space:]]*//')"
 
           if [ "$code" -eq 2 ] && printf '%s' "$output" | grep -q "not implemented"; then
-            status="not implemented (compile-check main path lands in M1-3)"
+            status="not implemented on this ref (pre-M1-3; PR #6 implements the main path on main)"
             if [ "$ALLOW_UNIMPLEMENTED" = "true" ]; then
               row_code=0
             else

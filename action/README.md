@@ -90,15 +90,17 @@ regardless of any baseline; there is no such thing as an acceptable baseline
 of wrong answers. Full detail in
 [`docs/action.md`](../docs/action.md#baseline-semantics).
 
-## Degrading honestly, today
+## Degrading honestly on a pre-M1-3 `ref`
 
-`compile-check`'s main run path (the oracles, stage localization, and the
-terminal/JSON/Markdown reports) lands in M1-3 of [PLAN.md](../PLAN.md); before
-that, a real target exits 2 with a fixed "not implemented" message. This
-action detects exactly that message and, only when you set
-`allow-unimplemented: true`, treats it as neutral instead of a failure — the
-self-test workflow does this so it stays green before M1-3 lands, and the same
-gate turns into a real check with no workflow change needed once it does. The
-default, `allow-unimplemented: false`, reports that same run as a real
-failure: a green job that checked nothing is worse than a red one that says
-so.
+`compile-check`'s main run path — the oracles, stage localization, and the
+terminal/JSON/Markdown reports — landed in M1-3 of [PLAN.md](../PLAN.md)
+([PR #6](https://github.com/HussainNizamani/compile-check/pull/6)), so
+`compile-check <target>` on `main` (the default `ref`) runs for real today:
+exit 0 clean, 1 on a `--fail-on` finding, 2 on a tool error. Only a `ref`
+pinned to a commit *before* M1-3 still exits 2 with a fixed "not implemented"
+message for any real target. This action detects exactly that message and,
+only when you set `allow-unimplemented: true`, treats it as neutral instead
+of a failure — backward compatibility for a workflow pinned to an old `ref`,
+not the current state of `main`. The default, `allow-unimplemented: false`,
+reports that same pre-M1-3 run as a real failure: a green job that checked
+nothing is worse than a red one that says so.
