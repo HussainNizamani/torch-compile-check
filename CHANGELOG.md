@@ -300,7 +300,7 @@ own numbering for the rest), in merge order.
   `budget`; a job summary carrying the graph-break count and a minimized block,
   rendered by `action/summary.sh`; and self-test jobs for the baseline round
   trip and for a seeded regression the action has to fail on.
-- **M4-2**: README, docs, and CHANGELOG for `0.1.0`; the cross-architecture
+- **M4-2** (PR #17): README, docs, and CHANGELOG for `0.1.0`; the cross-architecture
   runbook. README: the status banner replaced with "What it does" (one
   paragraph plus the five checks), a real red run against
   `cases/dtype_promotion.py` trimmed to the checks table, the finding, and
