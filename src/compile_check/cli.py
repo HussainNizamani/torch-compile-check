@@ -17,6 +17,7 @@ importing this module does not import torch.
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import sys
 from collections.abc import Mapping, Sequence
@@ -27,6 +28,8 @@ from compile_check.env import probe_apis
 from compile_check.oracles import ORACLES
 
 PROG = "compile-check"
+
+log = logging.getLogger("compile_check")
 
 # PLAN.md "CLI surface for v1", exit codes: 0 clean, 1 at least one finding in a
 # --fail-on category, 2 tool error.
@@ -223,6 +226,9 @@ def run_only(args: argparse.Namespace) -> int:
     verdict, so nothing here decides whether a run is clean. Exit 2 means the
     tool could not get as far as a reference result, which is PLAN.md's rule
     that a model raising in eager is a tool error.
+
+    Nothing here lets a traceback out. A user who typed a backend name wrong
+    gets a sentence; the stack that produced it goes to the debug log.
     """
     if args.path is None:
         print(f"{PROG}: --run-only needs a target path or module", file=sys.stderr)
@@ -234,34 +240,57 @@ def run_only(args: argparse.Namespace) -> int:
         os.environ["TORCHINDUCTOR_FORCE_DISABLE_CACHES"] = "1"
 
     from compile_check.discover import DiscoveryError, load_target
-    from compile_check.runner import run_all
+    from compile_check.runner import RunnerError, run_all, validate_backends, validate_device
 
     backends = [name.strip() for name in args.backends.split(",") if name.strip()]
-    if not backends:
-        print(f"{PROG}: --backends is empty", file=sys.stderr)
-        return EXIT_ERROR
 
     try:
+        # Up front, in this order: the flags first, because a typo should be
+        # reported before a possibly slow import of the user's module, and the
+        # module before the run.
+        validate_backends(backends)
+        validate_device(args.device)
         target = load_target(args.path, entry=args.entry, inputs=args.inputs)
-    except DiscoveryError as exc:
-        print(f"{PROG}: {exc}", file=sys.stderr)
-        return EXIT_ERROR
+        runset = run_all(
+            target,
+            backends,
+            device=args.device,
+            seed=args.seed,
+            fullgraph=args.fullgraph,
+            dynamic=args.dynamic,
+            disable_caches=not args.allow_caches,
+        )
+    except (DiscoveryError, RunnerError) as exc:
+        # Ours, with a message written for a user: print it as it is.
+        return _tool_error(str(exc))
+    except Exception as exc:
+        # Not ours: a torch internal, a bad --entry object, an OSError. The
+        # class name carries information a bare message would not, and the
+        # traceback is still available with logging turned up.
+        log.debug("the run failed", exc_info=True)
+        return _tool_error(f"{type(exc).__name__}: {exc}")
 
-    runset = run_all(
-        target,
-        backends,
-        device=args.device,
-        seed=args.seed,
-        fullgraph=args.fullgraph,
-        dynamic=args.dynamic,
-        disable_caches=not args.allow_caches,
-    )
     print(format_run_only(runset))
 
     eager = runset.eager
     if eager is not None and not eager.ok:
         return EXIT_ERROR
     return EXIT_OK
+
+
+def _tool_error(message: str) -> int:
+    """Print one line on stderr and return the tool-error exit code.
+
+    One line: a multi-line torch message is truncated to its first line with a
+    marker, so the terminal never shows a wall of stack-shaped text on a path
+    whose whole point is that it is not a crash.
+    """
+    lines = [line for line in message.splitlines() if line.strip()]
+    first = lines[0] if lines else message
+    if len(lines) > 1:
+        first = f"{first} [+{len(lines) - 1} more lines, run with debug logging for the traceback]"
+    print(f"{PROG}: {first}", file=sys.stderr)
+    return EXIT_ERROR
 
 
 def format_run_only(runset: Any) -> str:

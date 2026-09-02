@@ -23,6 +23,7 @@ import importlib
 import logging
 import operator
 import os
+import platform
 import random
 import time
 import traceback
@@ -33,13 +34,96 @@ from compile_check.discover import Target
 from compile_check.env import collect_environment
 from compile_check.results import TRACEBACK_LINES, BackendResult, CapturedException, RunSet
 
-__all__ = ["CACHE_ENV_VAR", "run_all", "run_backend"]
+__all__ = [
+    "ABLATION_LADDER",
+    "CACHE_ENV_VAR",
+    "RunnerError",
+    "available_backends",
+    "run_all",
+    "run_backend",
+    "validate_backends",
+    "validate_device",
+]
 
 log = logging.getLogger("compile_check")
 
 # PLAN.md "Verified API surface": torch._inductor.config.force_disable_caches
 # reads this at import time, so the CLI sets it before importing torch.
 CACHE_ENV_VAR = "TORCHINDUCTOR_FORCE_DISABLE_CACHES"
+
+# PLAN.md "Stage localization": the ablation ladder, in order. Every backend the
+# installed torch registers is accepted; these four are the ones the tool is
+# about, so they are what an error message names.
+ABLATION_LADDER: tuple[str, ...] = (
+    "eager",
+    "aot_eager",
+    "aot_eager_decomp_partition",
+    "inductor",
+)
+
+
+class RunnerError(Exception):
+    """A run cannot be set up at all: unknown backend, unavailable device.
+
+    PLAN.md "CLI surface for v1" lists "backend unavailable" among the exit
+    code 2 conditions, alongside import and discovery failure. This is the
+    exception the CLI turns into that exit code, with the message printed as a
+    single line and no traceback: an unknown backend name is a typo by the user,
+    and a torch stack tells them nothing a sentence cannot.
+
+    It is deliberately not what a *model* failing raises. A target that blows up
+    inside eager is recorded on its BackendResult and reported per backend; only
+    a run that could not be started reaches this.
+    """
+
+
+def available_backends() -> list[str]:
+    """Every backend name ``torch.compile`` accepts on this install, sorted.
+
+    PLAN.md "Verified API surface": ``eager`` and ``aot_eager`` carry the
+    ``debug`` tag, so a plain ``list_backends()`` omits them and a validator
+    must pass ``exclude_tags=()``. ``eager`` is added anyway because the runner
+    treats it as the reference world and calls the target directly for it,
+    without going through the registry at all.
+    """
+    dynamo = importlib.import_module("torch._dynamo")
+    return sorted({"eager", *dynamo.list_backends(exclude_tags=())})
+
+
+def validate_backends(backends: Sequence[str]) -> list[str]:
+    """Check every requested backend name before anything is compiled.
+
+    Raises:
+        RunnerError: naming the unknown backends and listing the known ones.
+    """
+    if not backends:
+        raise RunnerError("no backends requested")
+    known = available_backends()
+    unknown = [name for name in backends if name not in known]
+    if unknown:
+        raise RunnerError(
+            f"unknown backend{'s' if len(unknown) > 1 else ''} "
+            f"{', '.join(repr(name) for name in unknown)}; the ablation ladder is "
+            f"{', '.join(ABLATION_LADDER)} "
+            f"({len(known)} backends are registered on this torch, see "
+            "torch._dynamo.list_backends(exclude_tags=()))"
+        )
+    return list(backends)
+
+
+def validate_device(device: str) -> str:
+    """Check the requested device is usable before anything is placed on it.
+
+    Raises:
+        RunnerError: the device was requested and torch cannot provide it.
+    """
+    torch = importlib.import_module("torch")
+    if device.startswith("cuda") and not torch.cuda.is_available():
+        raise RunnerError(
+            f"device {device!r} was requested but torch {torch.__version__} on "
+            f"{platform.machine()} reports no CUDA device is available"
+        )
+    return device
 
 
 def run_all(
@@ -71,8 +155,17 @@ def run_all(
         One :class:`~compile_check.results.BackendResult` per backend, in the
         order given, plus the environment block. A backend that raised is a
         recorded result, not an exception out of this function.
+
+    Raises:
+        RunnerError: the run could not be set up, because a backend name is not
+            registered on this torch or the device is unavailable.
     """
     torch = importlib.import_module("torch")
+    # Up front, before a single compile: a typo in --backends or a CUDA request
+    # on a CPU-only box is a setup error, and finding it after the eager lane
+    # has already run wastes the run and buries the message.
+    validate_backends(backends)
+    validate_device(device)
     _configure_caches(disable_caches)
 
     fn = target.fn
