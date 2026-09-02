@@ -768,3 +768,62 @@ def test_max_findings_zero_counts_without_printing(capsys, monkeypatch):
     assert "synthetic divergence" not in out
     assert "metadata  (1 fail)" in out
     assert "1 more metadata finding not shown (--max-findings 0)" in out
+
+
+def test_a_fresh_process_disables_the_caches_before_torch_is_imported(tmp_path):
+    # The in-process test above can only show that main() sets the variable;
+    # this one shows it is set early enough to matter. The child starts with
+    # TORCHINDUCTOR_FORCE_DISABLE_CACHES unset, so if main() set it after the
+    # first import torch the config would read False and the report would say
+    # so. PLAN.md "Runner semantics": verified that setting the variable makes
+    # torch._inductor.config.force_disable_caches read True.
+    from compile_check.runner import CACHE_ENV_VAR
+
+    env = dict(os.environ)
+    env.pop(CACHE_ENV_VAR, None)
+    env["TORCHINDUCTOR_CACHE_DIR"] = str(tmp_path / "codegen")
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "compile_check.cli",
+            str(FIXTURES / "mlp.py"),
+            "--backends",
+            "eager",
+            "--color",
+            "never",
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert completed.returncode == EXIT_OK, completed.stderr
+    assert "caches    disabled (force_disable_caches=True)" in completed.stdout
+
+
+def test_allow_caches_leaves_the_variable_alone_and_the_report_says_so(tmp_path):
+    from compile_check.runner import CACHE_ENV_VAR
+
+    env = dict(os.environ)
+    env.pop(CACHE_ENV_VAR, None)
+    env["TORCHINDUCTOR_CACHE_DIR"] = str(tmp_path / "codegen")
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "compile_check.cli",
+            str(FIXTURES / "mlp.py"),
+            "--backends",
+            "eager",
+            "--allow-caches",
+            "--color",
+            "never",
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert completed.returncode == EXIT_OK, completed.stderr
+    assert "ENABLED (force_disable_caches=False, --allow-caches)" in completed.stdout

@@ -74,3 +74,9 @@ jobs:
       # of them shows up here rather than in a user's run.
       - name: Probe the torch API surface
         run: compile-check --probe
+
+      # The console script end to end on every cell, not only the library: the
+      # tool's own claim is "one command", and a packaging or entry-point break
+      # would pass every test above.
+      - name: Run the tool on the reference fixture
+        run: compile-check tests/fixtures/mlp.py
