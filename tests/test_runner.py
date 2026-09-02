@@ -208,6 +208,73 @@ def test_inputs_are_isolated_between_backends():
     torch.testing.assert_close(other.outputs[0], original.sum())
 
 
+def test_module_state_is_isolated_between_backends():
+    # The other half of the isolation contract, added in M2-2: a buffer the
+    # forward pass writes to is module state, and sharing one object across the
+    # lanes carried it from one lane into the next.
+    target = load_target(str(FIXTURES / "counter_buffer.py"))
+    before = target.fn.calls.clone()
+    runset = run_all(target, ["eager", "aot_eager"])
+
+    eager = runset.results["eager"]
+    other = runset.results["aot_eager"]
+    assert eager.ok, eager.exception
+    assert other.ok, other.exception
+    # Both lanes were the first call on their own copy, so both multiplied by
+    # the same counter.
+    torch.testing.assert_close(eager.outputs[0], other.outputs[0])
+    # And the user's own module never ran at all: its counter is where it was.
+    torch.testing.assert_close(target.fn.calls, before)
+    assert runset.share_module is False
+
+
+def test_share_module_lets_one_lane_leak_into_the_next():
+    # The documented cost of the flag, pinned rather than described: with the
+    # lanes sharing one object the counter advances across them and the two
+    # lanes disagree, which is a divergence the harness caused.
+    target = load_target(str(FIXTURES / "counter_buffer.py"))
+    runset = run_all(target, ["eager", "aot_eager"], share_module=True)
+
+    eager = runset.results["eager"]
+    other = runset.results["aot_eager"]
+    assert eager.ok, eager.exception
+    assert other.ok, other.exception
+    assert not torch.equal(eager.outputs[0], other.outputs[0])
+    assert runset.share_module is True
+
+
+def test_a_module_that_cannot_be_copied_is_shared_with_a_warning(caplog):
+    class Uncopyable(torch.nn.Module):
+        def __deepcopy__(self, memo):
+            raise RuntimeError("this module refuses to be copied")
+
+        def forward(self, x):
+            return x * 2
+
+    module = Uncopyable()
+    target = Target(fn=module, example_inputs=(torch.ones(3),), name="inline:uncopyable")
+    with caplog.at_level(logging.WARNING, logger="compile_check"):
+        runset = run_all(target, ["eager"], grad=False)
+
+    assert runset.results["eager"].ok
+    assert "could not be deep copied" in caplog.text
+    assert "RuntimeError" in caplog.text
+
+
+def test_a_plain_callable_is_not_copied_per_lane():
+    # A function has no state to isolate, so the runner hands it over as it is.
+    seen = []
+
+    def fn(x):
+        seen.append(fn)
+        return x * 2
+
+    target = Target(fn=fn, example_inputs=(torch.ones(3),), name="inline:fn")
+    assert run_all(target, ["eager"], grad=False).results["eager"].ok
+    assert len(seen) == 2  # the measured call and the repeat call
+    assert all(entry is fn for entry in seen)
+
+
 def test_the_layout_of_every_input_is_recorded_around_the_call():
     target = load_target(str(FIXTURES / "mutating.py"))
     result = run_all(target, ["eager"]).results["eager"]

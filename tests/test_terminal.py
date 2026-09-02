@@ -119,6 +119,7 @@ environment
   machine   aarch64   cpu flags asimd asimdhp asimddp
   device    cpu   cuda available no
   run       backends eager, aot_eager, inductor   seed 0   fullgraph off   dynamic off   grad on
+  module    deep copied per lane
   caches    disabled (force_disable_caches=True)
 
 backends
@@ -157,6 +158,7 @@ environment
   machine   aarch64   cpu flags asimd asimdhp asimddp
   device    cpu   cuda available no
   run       backends eager, aot_eager, inductor   seed 0   fullgraph off   dynamic off   grad on
+  module    deep copied per lane
   caches    disabled (force_disable_caches=True)
 
 backends

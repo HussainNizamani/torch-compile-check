@@ -185,6 +185,16 @@ def _environment(runset: RunSet, paint: Paint) -> str:
             f"fullgraph {_on_off(runset.fullgraph)}   dynamic {_on_off(runset.dynamic)}   "
             f"grad {_on_off(runset.grad)}",
         ),
+        # Its own row, and printed for both modes rather than only for the
+        # non-default one: a lane that shares the module can diverge by itself,
+        # because a buffer the forward pass writes leaks into the next lane, so
+        # a report that did not say which mode produced it is not evidence.
+        (
+            "module",
+            "shared across every lane (--share-module)"
+            if runset.share_module
+            else "deep copied per lane",
+        ),
         ("caches", cache_line),
     ]
     return _section("environment", [f"{name:<10}{value}" for name, value in rows], paint)

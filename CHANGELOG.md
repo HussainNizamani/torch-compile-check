@@ -47,6 +47,12 @@ All notable changes to this project are documented here. The format follows
   told from a `copy_`, which two clones cannot say.
 - `cases/alias_copyback.py`: 195451 written to the discovery convention, so
   `compile-check cases/alias_copyback.py` runs it through the tool.
+- Module state is isolated per lane: every backend runs against its own deep
+  copy of the `nn.Module`, so a buffer the forward pass writes to (a step
+  counter, BatchNorm running statistics in train mode) cannot leak from one lane
+  into the next and read as a numerics divergence. `--share-module` turns the
+  copy off for a model too large to duplicate, and the report's environment
+  block says which mode produced it.
 - Tooling: ruff lint and format, mypy strict over `src/`, pytest, pre-commit, a
   `Makefile`, and a GitHub Actions matrix over Python 3.10 to 3.13 and torch
   stable and nightly on CPU.

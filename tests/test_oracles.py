@@ -833,6 +833,22 @@ def test_a_model_that_legitimately_aliases_and_mutates_is_not_a_finding(aliasing
     assert "input[1] mutated (values)" not in described
 
 
+def test_a_stateful_module_is_a_numerics_finding_only_when_the_lanes_share_it():
+    # Why the runner deep copies the module per lane (M2-2 housekeeping): the
+    # counter this fixture multiplies by is module state, and one object shared
+    # across the lanes carries it from the first into the second. The oracle is
+    # right both times -- the outputs really do differ -- which is exactly why
+    # the divergence must not be the harness's to cause.
+    target = load_target(str(FIXTURES / "counter_buffer.py"))
+    shared = run_all(target, ["eager", "aot_eager"], seed=0, share_module=True)
+    findings = run_oracles(shared.results["eager"], shared.results["aot_eager"], CFG)
+    fails = [finding for finding in findings if finding.severity == "fail"]
+    assert [finding.oracle for finding in fails] == ["numerics"]
+
+    isolated = run_all(target, ["eager", "aot_eager"], seed=0)
+    assert run_oracles(isolated.results["eager"], isolated.results["aot_eager"], CFG) == []
+
+
 @pytest.fixture(scope="module")
 def dtype_promotion_runset():
     """The 191308 case through the real backends; inductor costs seconds."""
