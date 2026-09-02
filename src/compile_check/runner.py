@@ -32,7 +32,13 @@ from typing import Any
 
 from compile_check.discover import Target
 from compile_check.env import collect_environment
-from compile_check.results import TRACEBACK_LINES, BackendResult, CapturedException, RunSet
+from compile_check.results import (
+    TRACEBACK_LINES,
+    BackendResult,
+    CapturedException,
+    RunSet,
+    TensorMeta,
+)
 
 __all__ = [
     "ABLATION_LADDER",
@@ -334,6 +340,7 @@ def run_backend(
     result.input_spec = spec
     result.input_refs = list(leaves)
     result.inputs_before = [_snapshot(torch, leaf) for leaf in leaves]
+    result.input_meta_before = [_describe(torch, leaf) for leaf in leaves]
 
     # PLAN.md "Runner semantics": no compiled artifact or guard from a previous
     # backend is reused. torch.compiler.reset() is the public spelling of
@@ -363,7 +370,7 @@ def run_backend(
     except Exception as exc:
         result.first_call_s = time.perf_counter() - started
         result.exception = _capture(exc)
-        result.inputs_after = [_snapshot(torch, leaf) for leaf in leaves]
+        _record_inputs_after(torch, result, leaves)
         log.debug("backend %s raised %s", backend, type(exc).__name__)
         return result
     result.first_call_s = time.perf_counter() - started
@@ -374,7 +381,7 @@ def run_backend(
     result.outputs = [_snapshot(torch, leaf) for leaf in out_leaves]
     # Taken after the measured call and before the repeat call, so an input
     # mutation is recorded once rather than twice (M2's mutation oracle).
-    result.inputs_after = [_snapshot(torch, leaf) for leaf in leaves]
+    _record_inputs_after(torch, result, leaves)
 
     # PLAN.md "Runner semantics": each backend is called twice with the same
     # inputs; the second call exists so the graph oracle can see a recompile.
@@ -516,11 +523,47 @@ def _clone_inputs(
     return tuple(cloned_args), dict(cloned_kwargs)
 
 
+def _record_inputs_after(torch: Any, result: BackendResult, leaves: Sequence[Any]) -> None:
+    """Snapshot the inputs as the call left them, values and layout together.
+
+    Both halves are taken at the same moment on purpose: the alias oracle reads
+    them as one pair, and a value snapshot taken before the repeat call beside a
+    layout read after it would describe a state that never existed.
+    """
+    result.inputs_after = [_snapshot(torch, leaf) for leaf in leaves]
+    result.input_meta_after = [_describe(torch, leaf) for leaf in leaves]
+
+
 def _snapshot(torch: Any, value: Any) -> Any:
     """A detached clone of a tensor, or a copy of a non-tensor leaf."""
     if isinstance(value, torch.Tensor):
         return value.detach().clone()
     return _deepcopy(value)
+
+
+def _describe(torch: Any, value: Any) -> TensorMeta | None:
+    """Where one leaf's bytes are, as plain data, or ``None``.
+
+    ``None`` covers both a leaf that is not a tensor and a tensor whose layout
+    refuses one of these questions -- a sparse tensor has no ``stride()``, a
+    meta tensor no storage. PLAN.md "alias" needs all of them together to decide
+    an overlap, so a partial record would be worse than none: it would let a
+    fact the runner could not read look like a fact that changed.
+    """
+    if not isinstance(value, torch.Tensor):
+        return None
+    try:
+        return TensorMeta(
+            shape=tuple(value.shape),
+            stride=tuple(value.stride()),
+            dtype=str(value.dtype),
+            storage_offset=value.storage_offset(),
+            data_ptr=value.data_ptr(),
+            storage_ptr=value.untyped_storage().data_ptr(),
+        )
+    except Exception as exc:
+        log.debug("no layout record for a %s leaf: %s", type(value).__name__, exc)
+        return None
 
 
 def _deepcopy(value: Any) -> Any:
