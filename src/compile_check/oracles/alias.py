@@ -356,6 +356,12 @@ class AliasOracle:
             message=message,
             details={
                 "field": field,
+                # The pair, as labels rather than only inside the sentence
+                # above: the test emitter of M3-2 writes an identity assertion
+                # against exactly these two entities, and a report that made it
+                # parse the message for them would break on a reworded message.
+                "left": left,
+                "right": right,
                 "expected": expected.describe() or f"{left}~{right} unrelated",
                 "got": got.describe() or f"{left}~{right} unrelated",
                 **context,
@@ -471,6 +477,7 @@ class AliasOracle:
                     ),
                     details={
                         "field": "internal_overlap",
+                        "left": f"output[{index}]",
                         "expected": mine,
                         "got": theirs,
                         **context,
@@ -500,6 +507,10 @@ class AliasOracle:
             message=message,
             details={
                 "field": field,
+                # The input this is about, for the same reason as on a link
+                # finding. There is no second entity: a mutation is a statement
+                # about one leaf.
+                "left": expected.label,
                 "expected": expected.describe() or f"{expected.label} not mutated",
                 "got": got.describe() or f"{got.label} not mutated",
                 **context,
