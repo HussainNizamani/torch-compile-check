@@ -204,6 +204,19 @@ This is the ablation ladder PyTorch maintainers walk by hand when triaging a com
 bug. Doing it automatically and printing the verdict is a large part of what makes a
 generated report worth reading.
 
+### Where divergence appears is not always where the fix belongs
+
+The stage verdict names the first backend whose output violates the contract, which
+is where the divergence becomes observable, not necessarily where the defect lives.
+Worked example, measured on torch 2.15.0.dev20260901 (aarch64, caches disabled): the
+191449 no-op view identity bug collapses two outputs into one object under `inductor`
+but not under `aot_eager`, because eager kernels return distinct view objects even when
+AOTAutograd has misclassified them; the fix (PR 191844) nevertheless lives in
+AOTAutograd's metadata analysis. The report therefore says "first diverges at
+inductor" and never "the bug is in inductor"; the Markdown issue draft carries the
+same wording, and the corpus records the first diverging backend per case so this
+distinction stays visible.
+
 ## Oracles
 
 Five oracles run against every backend result. Each has a defined comparison, a pass
