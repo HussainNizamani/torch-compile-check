@@ -106,6 +106,16 @@ class BackendResult:
     have diverged whatever the leaf values say.
     """
 
+    output_requires_grad: list[bool] = field(default_factory=list)
+    """``requires_grad`` of every output leaf, index-aligned with :attr:`outputs`.
+
+    Recorded rather than read back off :attr:`outputs`, because those are
+    ``detach()``ed clones and a detached tensor answers ``False`` whatever the
+    tensor it was cloned from said. PLAN.md "metadata" compares this field per
+    output; the metadata oracle reads it from here for exactly that reason, and
+    the runner's backward pass reads it to decide which outputs to reduce.
+    """
+
     inputs_before: list[Any] = field(default_factory=list)
     """Flattened input leaves as detached clones, taken before the first call."""
 
@@ -180,6 +190,39 @@ class BackendResult:
     def ok(self) -> bool:
         """Whether the forward pass completed."""
         return self.exception is None
+
+    @property
+    def grads(self) -> dict[str, Any]:
+        """Every gradient this run produced, keyed by a label naming its tensor.
+
+        The two records above are shaped for the runner that writes them: one
+        index-aligned list with a hole per input that got nothing, and one dict
+        per parameter name. The grad oracle asks a different question -- which
+        tensors ended up with a gradient at all, and are the two lanes' answers
+        the same set -- and it must be able to put the answer in a sentence.
+        This is that view: sparse, labelled, and the one place the labels are
+        written, so a message and a set comparison cannot drift apart.
+
+        The values are the same clone objects the two records hold, so reading
+        this costs a dict and no tensor memory.
+        """
+        labelled = {
+            f"input[{index}]": grad
+            for index, grad in enumerate(self.input_grads)
+            if grad is not None
+        }
+        labelled.update({f"parameter {name}": grad for name, grad in self.param_grads.items()})
+        return labelled
+
+    @property
+    def grad_present(self) -> tuple[str, ...]:
+        """The label of every tensor that received a gradient, in record order.
+
+        PLAN.md "grad" makes this set part of the contract: it must be identical
+        in both lanes, and a tensor that got a gradient in one world and not in
+        the other is a divergence whatever the gradients that did arrive say.
+        """
+        return tuple(self.grads)
 
 
 @dataclass

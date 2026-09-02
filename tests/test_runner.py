@@ -110,6 +110,49 @@ def test_parameter_grads_are_recorded_per_name(mlp_runset):
         assert result.input_grads == [None]
 
 
+def test_the_requires_grad_of_every_output_is_recorded(mlp_runset):
+    # Off the live leaf, because the clone beside it cannot say: the snapshot is
+    # detached, so it answers False whatever it copied.
+    for result in mlp_runset.results.values():
+        assert result.output_requires_grad == [True]
+        assert [tensor.requires_grad for tensor in result.outputs] == [False]
+
+
+def test_the_requires_grad_record_is_taken_even_with_grad_off():
+    target = load_target(str(FIXTURES / "mlp.py"))
+    result = run_all(target, ["eager"], grad=False).results["eager"]
+
+    assert result.grad_ran is False
+    assert result.output_requires_grad == [True]
+
+
+def test_the_grad_presence_set_labels_inputs_and_parameters():
+    x = torch.randn(4, 8, requires_grad=True)
+    target = load_target(str(FIXTURES / "mlp.py"))
+    result = run_all(
+        Target(fn=target.fn, example_inputs=(x,), name=target.name), ["eager"]
+    ).results["eager"]
+
+    assert result.grad_ran is True
+    assert result.grad_present == (
+        "input[0]",
+        "parameter net.0.weight",
+        "parameter net.0.bias",
+        "parameter net.2.weight",
+        "parameter net.2.bias",
+    )
+    # The labelled view holds the same clones the two records do, not copies.
+    assert result.grads["input[0]"] is result.input_grads[0]
+    assert result.grads["parameter net.0.bias"] is result.param_grads["net.0.bias"]
+
+
+def test_an_input_that_got_no_gradient_is_absent_from_the_presence_set(mlp_runset):
+    for result in mlp_runset.results.values():
+        assert result.input_grads == [None]
+        assert "input[0]" not in result.grad_present
+        assert len(result.grad_present) == 4
+
+
 def test_input_grads_are_recorded_when_the_input_requires_grad():
     x = torch.randn(3, 4, requires_grad=True)
     target = Target(fn=torch.sin, example_inputs=(x,), name="inline:sin")

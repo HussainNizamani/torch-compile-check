@@ -18,6 +18,14 @@ compiled kernel is free to pick another one. Once either side is not contiguous
 the stride is observable: it decides what a view sees and what a mutation
 through that view writes.
 
+``requires_grad`` is the one field not read off the tensor in front of it. What
+this oracle compares are the runner's output *clones*, and a clone is taken with
+``detach()``, so it answers ``False`` however the tensor it copied was built;
+before M2-2 that made this field vacuous on every real run. The runner now
+records the flag off the live output leaf, and that record wins wherever it
+exists. A hand-built pair carrying no record still falls back to the tensor,
+which is what comparing two tensors made on the spot is meant to mean.
+
 Torch is imported inside the functions, never at module scope.
 """
 
@@ -71,7 +79,17 @@ class MetadataOracle:
         torch = importlib.import_module("torch")
         pairs, findings = align_outputs(eager, other, self.name)
         for index, expected, got in pairs:
-            findings.extend(self._compare_leaf(torch, index, expected, got, other.backend))
+            findings.extend(
+                self._compare_leaf(
+                    torch,
+                    index,
+                    expected,
+                    got,
+                    other.backend,
+                    _recorded_requires_grad(eager, index),
+                    _recorded_requires_grad(other, index),
+                )
+            )
         return findings
 
     def _compare_leaf(
@@ -81,6 +99,8 @@ class MetadataOracle:
         expected: Any,
         got: Any,
         backend: str,
+        expected_requires_grad: bool | None = None,
+        got_requires_grad: bool | None = None,
     ) -> list[Finding]:
         """One output leaf."""
         expected_is_tensor = isinstance(expected, torch.Tensor)
@@ -88,8 +108,8 @@ class MetadataOracle:
         if not expected_is_tensor or not got_is_tensor:
             return self._compare_types(index, expected, got, backend)
 
-        expected_fields = _describe(torch, expected)
-        got_fields = _describe(torch, got)
+        expected_fields = _describe(torch, expected, expected_requires_grad)
+        got_fields = _describe(torch, got, got_requires_grad)
         findings = []
         for name in FIELDS:
             expected_value = expected_fields[name]
@@ -163,7 +183,18 @@ class MetadataOracle:
         ]
 
 
-def _describe(torch: Any, tensor: Any) -> dict[str, Any]:
+def _recorded_requires_grad(result: BackendResult, index: int) -> bool | None:
+    """What the runner saw on the live output leaf, or ``None`` if it took no record.
+
+    ``None`` is what a hand-built :class:`~compile_check.results.BackendResult`
+    gives, and it means "ask the tensor", not "the tensor did not require grad".
+    """
+    if index < len(result.output_requires_grad):
+        return result.output_requires_grad[index]
+    return None
+
+
+def _describe(torch: Any, tensor: Any, requires_grad: bool | None = None) -> dict[str, Any]:
     """Every compared field of one tensor, as report-ready values.
 
     Values are strings, ints, bools, and lists rather than torch objects, so a
@@ -171,6 +202,13 @@ def _describe(torch: Any, tensor: Any) -> dict[str, Any]:
     layout refuses to answer (a sparse or nested tensor and ``stride()``) is
     recorded as unavailable rather than as an error: the layout difference is
     the finding, and a traceback out of an oracle is not.
+
+    Args:
+        torch: the imported torch module.
+        tensor: the leaf to describe.
+        requires_grad: the runner's record for this leaf, which replaces what
+            the tensor says. ``None`` leaves the tensor to answer. See this
+            module's docstring for why the tensor cannot be trusted for it.
     """
     fields: dict[str, Any] = {}
     readers: dict[str, Callable[[], Any]] = {
@@ -190,6 +228,8 @@ def _describe(torch: Any, tensor: Any) -> dict[str, Any]:
         except Exception as exc:
             log.debug("%s is unavailable on this tensor: %s", name, exc)
             fields[name] = _UNAVAILABLE
+    if requires_grad is not None:
+        fields["requires_grad"] = requires_grad
     return fields
 
 
