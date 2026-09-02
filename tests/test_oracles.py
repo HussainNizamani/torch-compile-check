@@ -3,8 +3,14 @@
 Most of these are hand-built tensor pairs rather than runs: an oracle's rules
 are exactly what has to be pinned down, and a pair built here says what it is
 testing in one line, where a compiled model saying the same thing costs seconds
-and depends on what this torch happens to do. The two integration tests at the
-end are the ones that check the hand-built rules still describe real runs.
+and depends on what this torch happens to do. The integration tests in the
+middle of the file -- the MLP, the aliasing fixture, the stateful module -- are
+the ones that check the hand-built rules still describe real runs.
+
+The regression corpus is not run here. ``tests/test_corpus_oracles.py`` puts
+every case through the runner and every oracle in one parametrized test, graded
+against the case's own ``check()``; what stays in this file is the shape of each
+bug as a synthetic result, which holds on a torch where the bug is fixed.
 
 conftest.py has already set TORCHINDUCTOR_FORCE_DISABLE_CACHES=1, before torch
 was imported, which is the only moment at which it can be set.
@@ -19,8 +25,7 @@ from typing import Any
 import pytest
 import torch
 
-from compile_check.discover import Target, import_target_module, load_target
-from compile_check.localize import localize
+from compile_check.discover import import_target_module, load_target
 from compile_check.oracles import (
     DEFAULT_GRAD_TOL_FACTOR,
     ORACLE_NAMES,
@@ -1167,41 +1172,22 @@ def test_a_stateful_module_is_a_numerics_finding_only_when_the_lanes_share_it():
     assert run_oracles(isolated.results["eager"], isolated.results["aot_eager"], CFG) == []
 
 
-@pytest.fixture(scope="module")
-def dtype_promotion_runset():
-    """The 191308 case through the real backends; inductor costs seconds."""
-    target = load_target(str(CASES / "dtype_promotion.py"))
-    return run_all(target, ["eager", "inductor"], seed=0)
-
-
-def test_the_191308_case_is_reported_when_this_torch_still_has_the_bug(dtype_promotion_runset):
-    eager = dtype_promotion_runset.results["eager"]
-    inductor = dtype_promotion_runset.results["inductor"]
-    assert eager.ok, eager.exception
-    assert inductor.ok, inductor.exception
-
-    findings = run_oracles(eager, inductor, CFG)
-    dtypes = (eager.outputs[0].dtype, inductor.outputs[0].dtype)
-    if dtypes[0] == dtypes[1]:  # pragma: no cover - depends on the torch build
-        # The issue is open, but the shape family is narrow; a torch that fixes
-        # it must turn this case green, not turn the suite red.
-        assert findings == []
-        pytest.skip(f"this torch keeps the dtype ({dtypes[0]}), so there is nothing to report")
-
-    fails = [finding for finding in findings if finding.severity == "fail"]
-    assert [finding.details["field"] for finding in fails] == ["dtype"]
-    assert fails[0].oracle == "metadata"
-    # PLAN.md "metadata": the values were arguably defensible, the dtype was
-    # not, which is exactly what makes this the metadata oracle's bug.
-    assert [finding for finding in findings if finding.oracle == "numerics"] == []
-    assert torch.equal(
-        eager.outputs[0].to(torch.int64),
-        inductor.outputs[0].to(torch.int64),
-    )
+# --------------------------------------------------------------------------
+# the regression corpus, as shapes rather than as runs
+#
+# Whether each corpus case still reproduces on the installed torch, and whether
+# compile-check reports it when it does, is tests/test_corpus_oracles.py: one
+# parametrized run of every case through the runner and every oracle, graded
+# against the case's own check(). What is left here is the half of each case
+# that does not depend on the torch build -- the shape of the bug, handed to an
+# oracle as a synthetic result. It pins the rule down on a torch where the bug
+# is long fixed, which is the point of writing it separately, and it costs one
+# eager run instead of three lanes.
+# --------------------------------------------------------------------------
 
 
 def test_the_191308_shape_is_flagged_from_a_synthetic_result():
-    # The version-independent half of the case above: whatever this torch does,
+    # The version-independent half of 191308: whatever this torch does,
     # a lane that came back int64 where eager returned int8 is a metadata fail.
     target = load_target(str(CASES / "dtype_promotion.py"))
     eager = run_all(target, ["eager"], seed=0).results["eager"]
@@ -1218,68 +1204,14 @@ def test_the_191308_shape_is_flagged_from_a_synthetic_result():
     }
 
 
-# --------------------------------------------------------------------------
-# integration: the alias cases from the regression corpus
-# --------------------------------------------------------------------------
-
-
-def corpus_case(name: str) -> Any:
-    """Import a corpus script and hand back the module.
-
-    The case scripts are the source of truth for whether a bug reproduces on the
-    installed torch: each carries its own ``build()`` and its own ``check()``,
-    and the tests below ask *them* rather than hard-coding a version window that
-    would go stale.
-    """
-    return import_target_module(str(CASES / f"{name}.py"))
-
-
-@pytest.fixture(scope="module")
-def slice_scatter_run():
-    """The 195451 case through the real runner; inductor costs seconds."""
-    case = corpus_case("alias_slice_scatter_copyback")
-    fn, example_inputs = case.build()
-    target = Target(fn=fn, example_inputs=example_inputs, name="alias_slice_scatter_copyback:fn")
-    return case, run_all(target, ["eager", "aot_eager", "inductor"], seed=0)
-
-
-def test_the_195451_case_is_reported_when_this_torch_still_has_the_bug(slice_scatter_run):
-    case, runset = slice_scatter_run
-    eager = runset.results["eager"]
-    inductor = runset.results["inductor"]
-    assert eager.ok, eager.exception
-    assert inductor.ok, inductor.exception
-
-    findings = [f for lane in runset.others for f in run_oracles(eager, lane, CFG)]
-    alias_fails = [f for f in findings if f.oracle == "alias" and f.severity == "fail"]
-
-    # The case script's own verdict, asked of the objects this run produced, and
-    # asked after the oracles have run: its RED probe mutates the output it is
-    # given, to prove the alias is load-bearing.
-    is_red, message = case.check(
-        (eager.input_refs[0], eager.output_refs[0]),
-        (inductor.input_refs[0], inductor.output_refs[0]),
-        None,
-    )
-    if not is_red:  # pragma: no cover - depends on the torch build
-        assert alias_fails == []
-        pytest.skip(f"this torch does not reproduce 195451: {message}")
-
-    assert [f.details["field"] for f in alias_fails] == ["identity_added"]
-    assert [f.backend for f in alias_fails] == ["inductor"]
-    # The numbers agree in both worlds; only the aliasing differs, which is what
-    # makes this the alias oracle's bug and not the numerics oracle's.
-    assert [f for f in findings if f.oracle == "numerics" and f.severity == "fail"] == []
-    verdict = localize(runset, findings)
-    assert verdict.first_divergent_backend == "inductor"
-    assert "first diverges at inductor" in verdict.summary
-
-
-def test_the_195451_shape_is_flagged_from_a_synthetic_result(slice_scatter_run):
-    # The version-independent half of the case above: whatever this torch does,
-    # a lane that handed back the input object as its output is an alias fail.
-    _case, runset = slice_scatter_run
-    eager = runset.results["eager"]
+def test_the_195451_shape_is_flagged_from_a_synthetic_result():
+    # The other version-independent shape: whatever this torch does, a lane that
+    # handed back the input object as its output is an alias fail. Built on top
+    # of a real eager run rather than out of thin air, because the relation the
+    # oracle compares is read off live tensors and their storages -- but one
+    # lane rather than three, since the compiled world here is the synthetic one.
+    target = load_target(str(CASES / "alias_copyback.py"))
+    eager = run_all(target, ["eager"], seed=0).results["eager"]
     reinplaced = BackendResult(
         backend="inductor",
         outputs=list(eager.outputs),
@@ -1296,74 +1228,3 @@ def test_the_195451_shape_is_flagged_from_a_synthetic_result(slice_scatter_run):
     assert findings[0].message == (
         "inductor returned input[0] itself as output[0] and eager returned a distinct object"
     )
-
-
-@pytest.fixture(scope="module")
-def noop_view_run():
-    """The 191449 case through the real runner; inductor costs seconds."""
-    case = corpus_case("alias_noop_view_identity")
-    fn, example_inputs = case.build()
-    target = Target(fn=fn, example_inputs=example_inputs, name="alias_noop_view_identity:fn")
-    return case, run_all(target, ["eager", "aot_eager", "inductor"], seed=0)
-
-
-def test_the_191449_case_is_reported_when_this_torch_still_has_the_bug(noop_view_run):
-    case, runset = noop_view_run
-    eager = runset.results["eager"]
-    inductor = runset.results["inductor"]
-    assert eager.ok, eager.exception
-    assert inductor.ok, inductor.exception
-
-    findings = [f for lane in runset.others for f in run_oracles(eager, lane, CFG)]
-    fails = [f for f in findings if f.severity == "fail"]
-    is_red, message = case.check(eager.outputs[0], inductor.outputs[0], None)
-    if not is_red:  # pragma: no cover - depends on the torch build
-        assert fails == []
-        pytest.skip(f"this torch does not reproduce 191449: {message}")
-
-    # RED, so the tool must report it -- but not from this oracle. What this
-    # case *returns* is `base + 1` after a resize_ through a no-op view, so the
-    # divergence reaches the report as a shape and a value difference; the
-    # aliasing underneath it is only visible when the base and the view are
-    # returned together, which is the run below.
-    assert fails != []
-    assert {f.oracle for f in fails} == {"numerics", "metadata"}
-    assert localize(runset, findings).first_divergent_backend == "inductor"
-
-
-@pytest.fixture(scope="module")
-def base_and_view_run():
-    """The alias-visible form of 191449: a base and its no-op view, together.
-
-    The corpus script carries this shape as its own identity probe; running it
-    through the real runner is what puts the collapse in front of the oracle.
-    """
-
-    def fn(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        base = x + 1
-        return base, base.view(-1)
-
-    target = Target(fn=fn, example_inputs=(torch.zeros(1),), name="inline:base_and_view")
-    return run_all(target, ["eager", "aot_eager", "inductor"], seed=0)
-
-
-def test_the_191449_identity_collapse_is_an_alias_fail(base_and_view_run):
-    runset = base_and_view_run
-    eager = runset.results["eager"]
-    inductor = runset.results["inductor"]
-    assert eager.ok, eager.exception
-    assert inductor.ok, inductor.exception
-    assert eager.output_refs[0] is not eager.output_refs[1], "eager itself collapsed the two"
-
-    findings = [f for lane in runset.others for f in run_oracles(eager, lane, CFG)]
-    alias_fails = [f for f in findings if f.oracle == "alias" and f.severity == "fail"]
-    if inductor.output_refs[0] is not inductor.output_refs[1]:  # pragma: no cover - torch build
-        assert alias_fails == []
-        pytest.skip("this torch keeps the base and the view apart, so 191449 is fixed here")
-
-    assert [f.details["field"] for f in alias_fails] == ["identity_added"]
-    assert [f.backend for f in alias_fails] == ["inductor"]
-    assert "one object for output[0] and output[1]" in alias_fails[0].message
-    # PLAN.md "Where divergence appears is not always where the fix belongs":
-    # the fix landed in AOTAutograd and the divergence still shows at inductor.
-    assert localize(runset, findings).first_divergent_backend == "inductor"
