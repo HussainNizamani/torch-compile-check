@@ -20,7 +20,7 @@ raised while eager did not), `2` a tool error.
 
 ```console
 $ compile-check --version
-compile-check 0.0.1.dev0
+compile-check 0.1.0
 ```
 
 `--probe` prints whether every torch API the oracles read (PLAN.md "Verified
@@ -57,7 +57,7 @@ resolves too. An empty module half (just `--entry callable_name`) means
 
 ```console
 $ compile-check tests/fixtures/named_entry.py --entry net --inputs bundle.make_inputs
-compile-check 0.0.1.dev0   target named_entry:net
+compile-check 0.1.0   target named_entry:net
 ...
 stage
   clean: no backend diverged from eager across 2 lanes
@@ -345,7 +345,11 @@ smaller and smaller versions of the case (PLAN.md "Minimizer, v1"): halve
 the leading input dimension, replace child modules with `torch.nn.Identity()`
 one at a time, keep every change the finding survives. `--budget` bounds the
 pass — a ceiling of 100 candidates applies when it is not given — and a run
-that hits either is reported as **partial**, never as a smallest case.
+that hits either is reported as **partial**, never as a smallest case: the
+report says which ceiling ran out rather than claiming the case would not
+shrink. `--budget 0` is allowed and means "start no candidate"; a negative
+value, or `nan`, is a tool error naming the flag rather than a ceiling that
+is silently already spent (or silently absent).
 
 ```console
 $ compile-check cases/alias_copyback.py --minimize --budget 60

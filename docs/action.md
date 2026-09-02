@@ -72,14 +72,14 @@ fixed version:
 | `python-version` | `3.12` | Passed to `actions/setup-python`. |
 | `baseline` | *(unset)* | Path to a stored graph-health baseline JSON, forwarded as `--baseline`. When set, the graph oracle fails on **new** breaks only rather than every break — see "Baseline semantics" below. |
 | `write-baseline` | *(unset)* | Path to write this run's graph health to, forwarded as `--write-baseline`. For the one-off job that produces the file you commit and then pass back as `baseline`; the run itself still reports its own verdict. Takes a single `targets` line — one baseline file is keyed by backend, not by target, so a second target would silently overwrite the first, and the action refuses instead. |
-| `minimize` | `false` | `"true"` passes `--minimize`, so a finding is shrunk — leading input dimension halved, child modules replaced with a passthrough — before it is reported. Costs one re-run of two lanes per candidate, which is what `budget` bounds. |
+| `minimize` | `false` | Exactly `"true"` or `"false"`. `"true"` passes `--minimize`, so a finding is shrunk — leading input dimension halved, child modules replaced with a passthrough — before it is reported. Costs one re-run of two lanes per candidate, which is what `budget` bounds. |
 | `budget` | *(unset)* | Wall-clock ceiling in seconds for the minimizer, forwarded to `--budget`. It bounds `minimize` only; see [Runtime budget](#runtime-budget). |
-| `cache` | `false` | `"true"` lets the run reuse compiled artifacts: torch's compile caches stay on (via the CLI's `--allow-caches`) and pip's wheel cache is restored and saved with `actions/cache`. The default is what makes a run measure the current compiler — see [Compile caches](#compile-caches). |
+| `cache` | `false` | Exactly `"true"` or `"false"`. `"true"` lets the run reuse compiled artifacts: torch's compile caches stay on (via the CLI's `--allow-caches`) and pip's wheel cache is restored and saved with `actions/cache`. The default is what makes a run measure the current compiler — see [Compile caches](#compile-caches). |
 | `json-out` | `compile-check-results.json` | Base path for the JSON results. With more than one target, each run writes its own file suffixed `.<n>.json` next to this base (`compile-check-results.1.json`, `.2.json`, ...), since one CLI invocation produces one JSON document per PLAN.md "Reports". |
 | `extra-args` | *(unset)* | Extra arguments appended verbatim to every invocation, for flags this action does not wrap directly (`--rtol`, `--seed`, `--fullgraph`, ...). |
 | `ref` | `main` | Git ref of `HussainNizamani/compile-check` to install from, until the package ships on PyPI. |
 | `source` | `auto` | Where to install compile-check from. `auto` installs from the checked-out source when the action runs inside this repo (its parent directory declares `compile-check` in `pyproject.toml`), else falls back to `git`. `local` forces the checked-out-source install. `git` forces `pip install git+https://.../compile-check@ref` — the only option that works for external consumers, since pip cannot clone a private repo without credentials. |
-| `allow-unimplemented` | `false` | See "Degrading honestly" below. |
+| `allow-unimplemented` | `false` | Exactly `"true"` or `"false"`. See "Degrading honestly" below. |
 
 ## Outputs
 
@@ -210,7 +210,41 @@ reduction at all.
 The rendering lives in [`action/summary.sh`](../action/summary.sh) rather than
 inline in `action.yml`, so it can be run outside a workflow;
 `tests/test_action_summary.py` executes that file against reports the CLI
-writes during the test.
+writes during the test. The step that drives it is
+[`action/run.sh`](../action/run.sh), split out for the same reason and driven
+the same way by `tests/test_action_run.py`.
+
+## The three boolean inputs take exactly `"true"` or `"false"`
+
+`minimize`, `cache` and `allow-unimplemented` are compared against the string
+`"true"`. Any other value is refused with an `::error::` line and exit 2,
+before any target runs:
+
+```
+::error::input cache must be "true" or "false", got "yes"
+```
+
+A composite action receives every input as a string, so this is a comparison of
+strings and not of booleans. `cache: "true"` and the unquoted YAML boolean
+`cache: true` both reach the step as `true` and are accepted; anything that
+arrives as some other string — `"yes"`, `"1"`, `"on"` — is refused rather than
+read as false, because a job that believed it was reusing its compile cache and
+was not is the kind of quiet wrongness this tool exists to complain about (and
+for `allow-unimplemented`, a job that believed it was tolerating a pre-M1-3
+`ref` and was failing on it). Quoting `"true"` and `"false"` is the habit that
+keeps the question from arising.
+
+## A target that cannot run gets a row like every other one
+
+A tool error on one target — a path that does not exist, a module that will not
+import, an unknown `--fail-on` category, an unparsable `budget` — produces a row
+of its own with exit code `2` and a `tool error: <the CLI's own sentence>`
+status, and the loop carries on to the next target. The step's `exit-code`
+output is the worst code across all of them, so the job still fails; what does
+not happen is the check on every later target being silently cancelled by the
+first typo. `exit-code` and `json-path` are written on every path out of the
+step, including the ones that refuse an input before running anything, because a
+caller with `continue-on-error: true` reads them to decide what to do next.
 
 ## Degrading honestly on a pre-M1-3 `ref`
 

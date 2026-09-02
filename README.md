@@ -1,7 +1,12 @@
 # compile-check
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-<!-- badge placeholders: CI, PyPI, and the torch matrix land with M4-3 -->
+<!--
+The CI, PyPI and Python-version badges are held back on purpose: a badge for a
+private repository or an unpublished package renders as a broken image, which
+is worse than no badge. The exact lines to paste here after the public flip and
+the upload are in docs/release.md, step 8.
+-->
 
 ## What it does
 
@@ -140,12 +145,12 @@ full detail, the tolerance policy, and provenance in
 
 | Target | Status | Exit | Findings | Seconds |
 |---|---|---|---|---|
-| `tv_resnet18` | clean | 0 | none | 24.7 |
-| `tv_mobilenet_v3_small` | clean | 0 | none | 51.1 |
-| `tv_efficientnet_b0` | clean | 0 | none | 64.5 |
-| `tv_vit_b_16_tiny` | clean | 0 | none | 15.7 |
-| `hf_tiny_bert` | clean | 0 | none | 17.9 |
-| `train_step_mlp` | clean | 0 | none | 9.4 |
+| `tv_resnet18` | clean | 0 | none | 28.5 |
+| `tv_mobilenet_v3_small` | clean | 0 | none | 61.2 |
+| `tv_efficientnet_b0` | clean | 0 | none | 91.1 |
+| `tv_vit_b_16_tiny` | clean | 0 | none | 18.9 |
+| `hf_tiny_bert` | clean | 0 | none | 19.4 |
+| `train_step_mlp` | clean | 0 | none | 10.7 |
 
 Run 2026-09-02 on torch `2.14.0+cpu` (git `08187d9e0fba`), aarch64, CPU
 only, `TORCHINDUCTOR_FORCE_DISABLE_CACHES=1`, backends

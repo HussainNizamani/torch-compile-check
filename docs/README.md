@@ -21,3 +21,7 @@ which piece.
   compile-check on a second machine (an x86 CPU box, a CUDA box) and diffing
   its results against the committed aarch64 run, and what cross-architecture
   parity means.
+- [release.md](release.md) — the maintainer's runbook for the four steps M4
+  prepares and does not take: the tag, the PyPI upload, the public flip, and
+  the Marketplace listing, with what each one makes visible and which of them
+  cannot be undone.

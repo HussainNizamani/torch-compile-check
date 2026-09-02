@@ -67,7 +67,7 @@ Confirm the install before running anything that matters:
 
 ```console
 $ compile-check --version
-compile-check 0.0.1.dev0
+compile-check 0.1.0
 $ compile-check --probe
 ```
 

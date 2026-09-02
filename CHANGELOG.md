@@ -333,9 +333,72 @@ own numbering for the rest), in merge order.
   without, and moved the heading to `[Unreleased] → 0.1.0` to say plainly
   what this file is building toward, without claiming the tag or the PyPI
   upload has happened.
+- **M4-3** (PR #18): release engineering for `0.1.0`, and the fixes four
+  earlier verifiers left behind. `pyproject.toml`: version `0.1.0` (in step
+  with `compile_check.__version__`), full PyPI metadata -- PEP 639
+  `license = "MIT"` plus `license-files`, keywords, classifiers, a
+  `Documentation` URL -- and a `validation` extra (`torchvision`,
+  `transformers<5`) so the real-world targets install with one command;
+  `build` and `twine` join the `dev` extra. `python -m build` and
+  `twine check` are clean, and both the wheel and the sdist were installed
+  into a fresh virtual environment and run there. `docs/release.md`: the
+  maintainer's runbook for the four steps this milestone prepares and
+  deliberately does not take -- the tag, the PyPI upload, the public flip,
+  and the Marketplace listing -- in order, with what each one makes visible,
+  which of them cannot be undone, and the Marketplace's
+  metadata-file-in-the-root requirement that `action/action.yml` does not
+  currently meet. `action/run.sh`: the "Run compile-check" step moved out of
+  `action.yml` into a file that `tests/test_action_run.py` executes, the same
+  split `summary.sh` already had.
 
 ### Fixed
 
+- The Action's "Run compile-check" step no longer dies on the first target it
+  cannot run. Its stage-parsing pipeline ran under `set -e`, and `grep` finding
+  neither "first diverges at" nor "clean:" -- which is every tool error: a
+  missing target, a bad flag, an unknown `--fail-on` category, an unparsable
+  `budget` -- aborted the whole step. The result was exit 1, an empty summary
+  table, no `exit-code` or `json-path` output, and every later target silently
+  unchecked, so one typo in one `targets` line cancelled the check on all the
+  others. Each target now gets a row of its own (`2`, `tool error: <the CLI's
+  sentence>`), the loop carries on, the worst code across the targets is the
+  step's own, and both outputs are written on every path out of it, including
+  the ones that refuse an input before anything runs. Pre-existing since A-1;
+  found by the M4-1 verifier (M4-3).
+- `validation/run.py` reports a target whose extra is installed but will not
+  import as **skipped with the reason**, not as a tool error.
+  `importlib.util.find_spec` says `transformers` 5 is present and
+  `from transformers import BertModel` then raises `ModuleNotFoundError` out of
+  its lazy importer, which made `hf_tiny_bert` exit 2 and read as "compile-check
+  is broken" rather than "this environment cannot build the target". The
+  `validation` extra pins `transformers<5` so the row is real (M4-2 estate run,
+  M4-3).
+- `minimize.py` no longer says a case is irreducible when a ceiling stopped it.
+  Under `--budget 0` the shrink pass reported "every input's leading dimension
+  is load-bearing: halving it stopped reproducing", a measurement it had not
+  made, and `Minimization.summary` -- the line the Action's job summary prints
+  -- said "every input and every child is load-bearing" for the same reason.
+  Both now name the ceiling that ran out (M3-3 verifier, M4-3).
+- `--budget` below zero is a tool error naming the flag, instead of being read
+  as a ceiling that had already expired; so is `nan`, which every comparison
+  read as no ceiling at all (M3-3 verifier, M4-3).
+- `oracles/graph.py` `read_baseline` refuses a baseline entry that is missing
+  `graph_break_count` or `break_reasons`, exit 2 with the field named. They
+  defaulted to `0` and `[]`, which turned a truncated or hand-edited entry into
+  the strictest baseline there is: every break the lane really had came back as
+  a *new* break and failed the job, and nothing in the message mentioned the
+  file (M3-1 verifier, M4-3).
+- `report/json.py` `validate` checks `schema_version` first and reports it
+  alone. A v1 artifact used to be rejected for a missing `minimized` key, which
+  described a v1 document as a damaged v2 one; it is now named as version 1
+  against the version this build writes (M3-3 verifier, M4-3).
+- The corpus runs once per environment instead of twice. `cases.summary.observe`
+  keeps its verdicts in a JSON file under the system temporary directory and
+  reuses an entry only when the torch build, the interpreter, the machine and
+  the case's own source are all unchanged, so CI's job-summary step stops
+  re-compiling what the `pytest` step in the same job already measured
+  (roughly a minute per matrix cell). The table says how many rows were reused
+  (M2-3 note, M4-3).
 - `report/repro.py`: the whole-file fallback hands its `from __future__`
   imports out instead of leaving them in the middle of the block. They are
   only legal directly under a module docstring, so every regression test
