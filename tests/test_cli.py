@@ -443,7 +443,7 @@ def test_the_main_path_reports_a_clean_model_and_exits_zero(capsys):
 
     assert code == EXIT_OK
     assert out.startswith(f"compile-check {__version__}   target mlp:model")
-    assert "clean: no backend diverged from eager across 1 lanes" in out
+    assert "clean: no backend diverged from eager across 1 lane" in out
     assert "findings\n  none" in out
     # The environment block a parity comparison needs (PLAN.md
     # "Cross-architecture parity is a feature").

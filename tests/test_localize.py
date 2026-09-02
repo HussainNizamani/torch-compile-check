@@ -245,3 +245,9 @@ def test_a_verdict_is_immutable():
     assert isinstance(verdict.backends[0], BackendSummary)
     with pytest.raises(AttributeError):
         verdict.stage = "something else"  # type: ignore[misc]
+
+
+def test_the_clean_summary_counts_lanes_in_the_singular_when_there_is_one():
+    assert localize(make_runset("eager", "inductor"), []).summary == (
+        "clean: no backend diverged from eager across 1 lane"
+    )
