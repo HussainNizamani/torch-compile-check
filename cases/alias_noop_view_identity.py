@@ -22,19 +22,23 @@ compiled graph with the wrong shape.
 Oracle: alias (object identity + downstream shape corruption after a
 graph-break).
 
-First diverging backend: the issue frames the root cause as an AOTAutograd
-metadata-classification bug (`collect_metadata_analysis.py`), upstream of
-backend codegen, so it would be expected to affect `aot_eager` too. Run
-here with `--backend aot_eager`: RED on `inductor`, GREEN on `aot_eager` --
-`aot_eager` did NOT reproduce the shape corruption on this box, so the
-observed split contradicts the "same root cause, both backends" framing for
-this specific resize_-after-graph-break repro; not investigated further
-here.
+First diverging backend: `inductor` -- but the fix location is AOTAutograd
+(`collect_metadata_analysis.py`), and those are two different things, not a
+contradiction. Run here with `--backend aot_eager`: RED on `inductor`,
+GREEN on `aot_eager`. The misclassification AOTAutograd makes (a no-grad
+no-op view falls into `non_alias` instead of an alias-needing-regeneration)
+is backend-independent, but it is only *observable* when the backend
+collapses the two logical outputs into one Python object -- Inductor's
+`remove_noop_ops` / `pointless_view` do that; `aot_eager`'s eager kernels
+return distinct view objects regardless of how AOTAutograd classified them,
+so the corruption never surfaces there even pre-fix. A stage verdict (which
+backend diverges) says where the divergence becomes visible, never where
+the bug lives.
 
-Known-bad torch versions: RED reproduced here on torch
-2.15.0.dev20260831+cpu (git cbf102a9aec0f6f83466e0584e66d9a96ab613f6),
-aarch64, CPU, on the default `inductor` backend -- this build predates the
-fix, which merged at 2026-09-02T03:45:57Z. Expected GREEN on any torch
+Known-bad torch versions: RED reproduced on torch 2.15.0.dev20260901+cpu
+(git 279f79e09c3f3ef458061013bda2d2f483c02cae), aarch64, CPU, in a freshly
+installed venv, on the default `inductor` backend -- this build predates
+the fix, which merged at 2026-09-02T03:45:57Z. Expected GREEN on any torch
 nightly built from a checkout that includes commit
 a3586f00181a395b066cdf3a8933c2b47b7a6890 or later; not yet verified against
 such a build (none was available in this environment at the time this case
