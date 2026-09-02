@@ -4,11 +4,14 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [Unreleased] → 0.1.0
 
-Every entry below is grouped by the slice it landed in (PLAN.md's milestone
-schedule for the `M*` slices, the office's own numbering for the rest), in
-merge order.
+Everything below is what ships as `0.1.0` — PLAN.md "M4"'s definition of
+done for this milestone — once it is tagged; the tag, the PyPI upload, and
+the Marketplace listing are a maintainer's own release step, not something
+this file claims has already happened. Every entry is grouped by the slice
+it landed in (PLAN.md's milestone schedule for the `M*` slices, the office's
+own numbering for the rest), in merge order.
 
 ### Added
 
@@ -174,6 +177,29 @@ merge order.
   through the runner and every oracle in one parametrized test, graded against
   the case's own `check()`, replacing four hand-written per-case integration
   tests and covering the two cases they never reached.
+- **A-2** (PR #11): Action and docs polish, office slice. The self-test
+  workflow's harness step moves its torch install to the CPU index; a
+  second job, `selftest-git-source`, forces `source: git` against
+  `ref: ${{ github.sha }}` with `continue-on-error: true` -- the only job
+  that exercises the git-install path an external consumer's workflow
+  actually uses, and expected to fail while the repository is private (pip
+  cannot clone a private repo without credentials), a red job with a stated
+  reason rather than a green one that never ran the path it claims.
+  `action/action.yml`: branding, a fuller Marketplace description, and the
+  job summary table gains a stage column parsed from the terminal report's
+  "first diverges at ..." / "clean: ..." line, plus the compile-check
+  version in the heading. `action/README.md`: the Marketplace-facing
+  README (an M0 placeholder until now) -- what it does, a minimal workflow,
+  and a pointer to `docs/action.md` as the single source for the inputs and
+  outputs table, source semantics, and baseline semantics.
+  `docs/action.md`: a section cross-referencing what `selftest-git-source`
+  does and does not cover. `CHANGELOG.md`: every existing bullet
+  re-grouped under its slice, in merge order, PR-numbered -- M1-1 and M1-2
+  confirmed already present in substance and labelled, A-1/C-1/C-2/C-3
+  added. `CONTRIBUTING.md`: the repo-wide gate as a fresh-venv checklist,
+  the no-AI-trailers / "AI assisted." rule, and a pointer to
+  `cases/README.md` and `docs/validation.md` for adding a corpus case or a
+  validation target.
 - **M3-1** (PR #13): the graph health oracle, the fifth and last of PLAN.md
   "Oracles". Every compiled lane is traced once more under
   `torch._dynamo.explain`, and the report gets the graph count, the break
@@ -202,7 +228,7 @@ merge order.
   to have been copied either. `tests/fixtures/graph_break.py`: a target with a
   deliberate `print` break and a deliberate data-dependent branch. All five
   oracles now run.
-- **M3-2**: the three report artifacts of PLAN.md "Reports", off one run.
+- **M3-2** (PR #14): the three report artifacts of PLAN.md "Reports", off one run.
   `report/json.py`: the CI-consumable artifact, `schema_version` 1, carrying
   the environment block (architecture always, per PLAN.md "Cross-architecture
   parity is a feature"), the run configuration including the module handling
@@ -234,7 +260,7 @@ merge order.
   saying so on stderr as `--write-baseline` does, and a write that fails is exit
   2 after the report rather than instead of it. `discover.load_target` records
   where the target came from (`results.TargetSource`) so a report can quote it.
-- **M3-3**: the minimizer of PLAN.md "Minimizer, v1", behind `--minimize`.
+- **M3-3** (PR #15): the minimizer of PLAN.md "Minimizer, v1", behind `--minimize`.
   `minimize.py` runs only after a fail-severity finding -- the same one the
   regression-test emitter writes about -- and re-runs exactly two lanes per
   candidate, the eager reference and the one that diverged, judging each by the
@@ -269,11 +295,44 @@ merge order.
   `tests/fixtures/divergent_child.py`: a three-block model whose middle block is
   the only one a registered perturbing backend keys on, so the delta-debugging
   pass has a target that is a fixture rather than a bug in the installed wheel.
-- **M4-1**: Action inputs `write-baseline`, `minimize`, `cache` (compile caches
+- **M4-1** (PR #16): Action inputs `write-baseline`, `minimize`, `cache` (compile caches
   on plus an `actions/cache` wheel cache) beside the existing `baseline` and
   `budget`; a job summary carrying the graph-break count and a minimized block,
   rendered by `action/summary.sh`; and self-test jobs for the baseline round
   trip and for a seeded regression the action has to fail on.
+- **M4-2** (PR #17): README, docs, and CHANGELOG for `0.1.0`; the cross-architecture
+  runbook. README: the status banner replaced with "What it does" (one
+  paragraph plus the five checks), a real red run against
+  `cases/dtype_promotion.py` trimmed to the checks table, the finding, and
+  the stage line, a "Bugs it has caught" table built from `FINDINGS.md`
+  with every issue and PR linked, the real numbers from
+  `docs/validation.md`, and a Quick start that installs from git until the
+  package is on PyPI. `docs/usage.md`: every CLI flag with one real,
+  executed example each, including the exit-code pair
+  (`--fail-on metadata` vs. `--fail-on numerics` against the same finding)
+  and the `--write-baseline` / `--baseline` round trip.
+  `docs/reports.md`: the JSON schema (v2, pointing at
+  `report/json.py`'s own docstring), the Markdown draft's shape, and the
+  emitted regression test -- run directly with `python test_case.py`,
+  which fails on this torch build because issue #191308 is still open, the
+  correct outcome for an assertion that has not been fixed upstream yet.
+  `docs/corpus.md`: the two file shapes in `cases/`, the marker table, and
+  a real `python -m cases.summary` run, deferring the detailed walkthrough
+  to `cases/README.md`. `docs/cross-arch.md`: the runbook PLAN.md
+  "Cross-architecture parity is a feature" calls for -- venv setup for an
+  x86 CPU or a CUDA box, the corpus health check, per-target JSON via
+  `compile-check --json` (`validation/run.py` has no `--json-dir` flag and
+  writes one combined summary file, not per-target JSON, so this is the
+  documented substitute), a diff script comparing `schema_version`,
+  `environment.machine`, `environment.cuda_available`, and `findings`
+  between two runs, and what parity does and does not mean. Every command
+  on every page above was executed for real in this slice's own venv; the
+  `docs/README.md` index, an M0 placeholder that had never been updated, is
+  rewritten to link all of it. `CHANGELOG.md`: backfilled the missing
+  **A-2** entry and the PR numbers **M3-2** and **M3-3** were merged
+  without, and moved the heading to `[Unreleased] → 0.1.0` to say plainly
+  what this file is building toward, without claiming the tag or the PyPI
+  upload has happened.
 
 ### Fixed
 

@@ -1,7 +1,10 @@
 # cases
 
 The regression corpus: one tiny model per known bug class, each carrying a
-known-bad torch version marker. See PLAN.md "Regression corpus".
+known-bad torch version marker. See PLAN.md "Regression corpus". This file
+is the detailed reference, including the walkthrough for adding a case; for
+the short version and what running the corpus looks like, see
+[docs/corpus.md](../docs/corpus.md).
 
 Two shapes of file live here, and the difference is deliberate.
 
