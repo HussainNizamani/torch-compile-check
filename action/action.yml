@@ -1,9 +1,17 @@
 name: "compile-check"
 description: >-
-  Differential testing for torch.compile: run declared entrypoints under
-  eager and compiled backends and fail the job when compilation changes the
-  answer. See docs/action.md.
+  Differential testing for torch.compile in CI: run your model's declared
+  entrypoints under eager and every compiled backend, catch the numerics,
+  aliasing, metadata, and gradient bugs compilation can silently introduce,
+  and fail the job on the categories you choose. Installs compile-check,
+  runs it against the targets you list, writes a job-summary row per target
+  with its stage verdict, and uploads the JSON results. See docs/action.md
+  for the full inputs/outputs reference.
 author: "HussainNizamani"
+
+branding:
+  icon: "check-circle"
+  color: "blue"
 
 # PLAN.md "GitHub Action": a composite action published from action/. Inputs
 # and outputs mirror the compile-check CLI surface (src/compile_check/cli.py)
@@ -183,12 +191,13 @@ runs:
         summary_rows=()
         json_paths=()
         index=0
+        version="$(compile-check --version)"
 
         {
-          echo "## compile-check results"
+          echo "## compile-check results ($version)"
           echo
-          echo "| target | exit code | status |"
-          echo "|---|---|---|"
+          echo "| target | exit code | status | stage |"
+          echo "|---|---|---|---|"
         } >>"$GITHUB_STEP_SUMMARY"
 
         while IFS= read -r target; do
@@ -211,6 +220,14 @@ runs:
 
           echo "$output"
 
+          # The stage verdict is the line right after the terminal report's
+          # "stage" heading (report/terminal.py): "first diverges at
+          # <backend>, ..." or "clean: ...". Absent entirely on a path that
+          # never got as far as a comparison (--probe, an unimplemented run,
+          # a tool error before discovery), so an empty cell there is
+          # accurate, not a parsing miss.
+          stage="$(printf '%s\n' "$output" | grep -m1 -E '^[[:space:]]*(first diverges at|clean:)' | sed 's/^[[:space:]]*//')"
+
           if [ "$code" -eq 2 ] && printf '%s' "$output" | grep -q "not implemented"; then
             status="not implemented (compile-check main path lands in M1-3)"
             if [ "$ALLOW_UNIMPLEMENTED" = "true" ]; then
@@ -225,7 +242,7 @@ runs:
             [ "$code" -gt "$worst" ] && worst=$code
           fi
 
-          echo "| \`$target\` | $row_code | $status |" >>"$GITHUB_STEP_SUMMARY"
+          echo "| \`$target\` | $row_code | $status | ${stage:--} |" >>"$GITHUB_STEP_SUMMARY"
         done <<<"$TARGETS"
 
         echo "exit-code=$worst" >>"$GITHUB_OUTPUT"
