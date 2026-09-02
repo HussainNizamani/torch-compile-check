@@ -26,6 +26,7 @@ from __future__ import annotations
 import ast
 import logging
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from compile_check.results import TargetSource
@@ -167,11 +168,19 @@ def extract(source: TargetSource | None) -> Repro | None:
     expression, reference = _inputs_expression(text, statements, bound, source.inputs)
 
     if kept is None:
+        # The whole file, minus its ``__future__`` imports, which are carried
+        # out the same way the reduced form carries them. They are only legal
+        # directly under a module docstring, so a caller that pastes this block
+        # into the middle of a generated file -- which is exactly what
+        # report/pytest_case.py does -- would otherwise produce a file that does
+        # not parse. Everything else is left verbatim: the point of the fallback
+        # is that the tool did not understand the file well enough to edit it.
+        whole = _drop_lines(text, future)
         return Repro(
-            source=text,
-            body=text,
-            body_without_inputs=text,
-            future_imports=(),
+            source=whole,
+            body=whole,
+            body_without_inputs=whole,
+            future_imports=tuple(_segment(text, node) for node in future),
             entry=source.entry,
             inputs_expr=expression,
             inputs_ref=reference,
@@ -403,6 +412,24 @@ def _render(imports: tuple[str, ...], body: str) -> str:
         return body
     head = "\n".join(imports)
     return f"{head}\n\n\n{body}" if body else head
+
+
+def _drop_lines(text: str, nodes: Sequence[ast.stmt]) -> str:
+    """``text`` without the lines ``nodes`` occupy, blank edges trimmed.
+
+    Line-based rather than statement-based on purpose: the whole-file fallback
+    keeps the user's own formatting, comments included, and rebuilding it from
+    the statements it parsed would silently reformat a file the tool has just
+    admitted it could not take apart.
+    """
+    if not nodes:
+        return text
+    removed = {
+        line for node in nodes for line in range(node.lineno, (node.end_lineno or node.lineno) + 1)
+    }
+    lines = text.splitlines()
+    kept = [line for number, line in enumerate(lines, start=1) if number not in removed]
+    return "\n".join(kept).strip("\n")
 
 
 def _segment(text: str, node: ast.AST) -> str:
