@@ -46,7 +46,6 @@ import os
 os.environ.setdefault("TORCHINDUCTOR_FORCE_DISABLE_CACHES", "1")
 
 import platform
-import subprocess
 import sys
 
 import torch
@@ -64,17 +63,14 @@ def build():
 
 
 def _git_hash():
-    try:
-        out = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=os.path.dirname(os.path.abspath(__file__)),
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        return out.stdout.strip() or "unknown"
-    except Exception:
+    # The provenance the RED/GREEN line needs is torch's own build commit,
+    # not this repo's -- a case can be RED/GREEN purely because of which
+    # torch checkout it ran against, and that is what the parity table in
+    # FINDINGS.md keys on.
+    git_version = getattr(torch.version, "git_version", None)
+    if not git_version:
         return "unknown"
+    return git_version[:7]
 
 
 def check(eager_out, compiled_out, inputs):
