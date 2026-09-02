@@ -280,12 +280,12 @@ class AliasOracle:
 
         if expected.same_object != got.same_object:
             field = "identity_added" if got.same_object else "identity_dropped"
-            mutator, other_lane = (backend, "eager") if got.same_object else ("eager", backend)
+            collapser, other_lane = (backend, "eager") if got.same_object else ("eager", backend)
             if right.startswith("input["):
                 # The 195451 shape: the lane handed back the input object itself
                 # rather than the independent result the model computed.
                 message = (
-                    f"{mutator} returned {right} itself as {left} and {other_lane} "
+                    f"{collapser} returned {right} itself as {left} and {other_lane} "
                     "returned a distinct object"
                 )
             else:
@@ -293,17 +293,15 @@ class AliasOracle:
                 # into one object, or one object split into two.
                 shared = " that share a storage" if expected.aliases or got.aliases else ""
                 message = (
-                    f"{mutator} returned one object for {left} and {right} and "
+                    f"{collapser} returned one object for {left} and {right} and "
                     f"{other_lane} returned distinct objects{shared}"
                 )
         elif expected.aliases != got.aliases:
             field = "alias_added" if got.aliases else "alias_dropped"
+            aliaser, other_lane = (backend, "eager") if got.aliases else ("eager", backend)
             message = (
-                f"{backend} {left} aliases {right} (same storage, overlapping bytes); "
-                f"eager's do not"
-                if got.aliases
-                else f"eager {left} aliases {right} (same storage, overlapping bytes); "
-                f"{backend}'s do not"
+                f"{aliaser} {left} aliases {right} (same storage, overlapping bytes) "
+                f"and the {other_lane} pair does not"
             )
         else:
             # Same storage, disjoint bytes: recorded because a reader chasing an
