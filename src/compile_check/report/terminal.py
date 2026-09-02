@@ -54,6 +54,28 @@ _WIDTH = 96
 
 _INDENT = "  "
 
+
+def _wrap(text: str, *, indent: str = "") -> list[str]:
+    """Wrap prose to :data:`_WIDTH` without ever splitting a path or identifier.
+
+    ``textwrap.wrap`` defaults to ``break_on_hyphens=True`` and
+    ``break_long_words=True``, either of which can cut a filesystem path (or
+    any other hyphenated or overlong token) mid-word — e.g. a baseline path
+    under a temp directory wrapping as ``pytest-of-`` / ``runner`` on two
+    lines, which then reads wrong once whitespace is normalised. A token that
+    still overflows the line is left intact rather than split: an overlong
+    line is a smaller cost than a corrupted path or identifier.
+    """
+    return textwrap.wrap(
+        text,
+        width=_WIDTH,
+        initial_indent=indent,
+        subsequent_indent=indent,
+        break_long_words=False,
+        break_on_hyphens=False,
+    )
+
+
 # Plain ANSI, no dependency. Applied only when the caller asked for colour.
 _RESET = "\033[0m"
 _CODES: dict[str, str] = {
@@ -466,17 +488,10 @@ def _finding_lines(finding: Finding, paint: Paint) -> list[str]:
         f"{finding.backend} {where}"
     )
     lines = [heading]
-    lines += textwrap.wrap(
-        finding.message,
-        width=_WIDTH,
-        initial_indent="      ",
-        subsequent_indent="      ",
-    ) or ["      (no message)"]
+    lines += _wrap(finding.message, indent="      ") or ["      (no message)"]
     detail = _detail_line(finding.details)
     if detail:
-        lines += textwrap.wrap(
-            detail, width=_WIDTH, initial_indent="      ", subsequent_indent="      "
-        )
+        lines += _wrap(detail, indent="      ")
     return lines
 
 
@@ -496,7 +511,7 @@ def _stage(verdict: StageVerdict, paint: Paint) -> str:
         style = "yellow"
     lines = [paint(verdict.summary, style)]
     if verdict.note:
-        lines += textwrap.wrap(verdict.note, width=_WIDTH)
+        lines += _wrap(verdict.note)
     if verdict.eager_exception is not None:
         lines.append("")
         lines.append("eager traceback (first lines):")
@@ -506,11 +521,10 @@ def _stage(verdict: StageVerdict, paint: Paint) -> str:
     for entry in repeat:
         assert entry.raised_on_repeat is not None
         lines.append("")
-        lines += textwrap.wrap(
+        lines += _wrap(
             f"{entry.backend} answered once and raised "
             f"{entry.raised_on_repeat.type} on the repeat call. That is graph health, "
-            "which the graph oracle reports above; it does not change this verdict.",
-            width=_WIDTH,
+            "which the graph oracle reports above; it does not change this verdict."
         )
 
     # Said here rather than left to be inferred from the checks table: the
@@ -520,12 +534,11 @@ def _stage(verdict: StageVerdict, paint: Paint) -> str:
     graph_fails = [entry for entry in verdict.backends if entry.graph_fail]
     for entry in graph_fails:
         lines.append("")
-        lines += textwrap.wrap(
+        lines += _wrap(
             f"{entry.backend} has {entry.graph_fail} fail-severity graph finding"
             f"{'' if entry.graph_fail == 1 else 's'}. A graph break is a slower plan "
             "rather than a different answer, so it names no compilation stage and does "
-            "not move this verdict; --fail-on graph is what turns it into exit code 1.",
-            width=_WIDTH,
+            "not move this verdict; --fail-on graph is what turns it into exit code 1."
         )
     return _section("stage", lines, paint)
 
