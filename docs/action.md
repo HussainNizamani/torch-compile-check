@@ -5,12 +5,13 @@ repository. It installs `compile-check`, runs it against the entrypoints you
 declare, fails the job on the configured `--fail-on` categories, and writes a
 job summary with one row per target.
 
-> **Status:** the CLI's main run path lands in M1-3 (see [PLAN.md](../PLAN.md)).
-> Until then every real target exits 2 with "not implemented", and the action
-> passes that through as a failure unless you set `allow-unimplemented: true`.
-> The self-test workflow (`.github/workflows/action-selftest.yml`) already
-> exercises `--version`, `--probe`, and `--run-only`, which do work today, and
-> turns into a real check with no changes needed once M1-3 merges.
+> **Status:** the CLI's main run path landed in M1-3
+> ([PR #6](https://github.com/HussainNizamani/compile-check/pull/6); see
+> [PLAN.md](../PLAN.md)). `compile-check <target>` on `main` runs for real:
+> exit 0 clean, 1 on a `--fail-on` finding, 2 on a tool error. Only a `ref`
+> pinned to a commit before M1-3 still exits 2 with "not implemented" for
+> every real target; the `allow-unimplemented` input exists for that case
+> (see "Degrading honestly on a pre-M1-3 ref" below), not for `main`.
 
 ## Usage
 
@@ -112,19 +113,22 @@ Compilation is slow, and a matrix multiplies it. Set `budget` to cap the
 wall-clock time per target; on a timeout, the action reports what it finished
 rather than claiming a false clean.
 
-## Degrading honestly
+## Degrading honestly on a pre-M1-3 `ref`
 
 The CLI's main run path (oracles, localization, the terminal/JSON/Markdown
-reports) is not implemented until M1-3 lands; today it exits `2` with a fixed
-"not implemented" message for anything other than `--version`, `--probe`, and
-the hidden `--run-only` developer path. This action detects exactly that
-message and, when `allow-unimplemented: true`, treats it as neutral (the step
-does not fail) instead of a tool error, with the summary row noting
-"not implemented in this compile-check version". With the default
-`allow-unimplemented: false`, that same run is reported as a real failure —
-a green job that checked nothing is worse than a red one that says so. Once
-M1-3 lands, drop `allow-unimplemented` (or leave it `false`) to get a real
-check with no other change to your workflow.
+reports) landed in M1-3 ([PR #6](https://github.com/HussainNizamani/compile-check/pull/6))
+and is on `main` today: `compile-check <target>` runs for real, exit 0/1/2
+on its own terms. Only a `ref` pinned to a commit before that PR still
+exits `2` with a fixed "not implemented" message for anything other than
+`--version`, `--probe`, and the hidden `--run-only` developer path. This
+action detects exactly that message and, when `allow-unimplemented: true`,
+treats it as neutral (the step does not fail) instead of a tool error, with
+the summary row noting "not implemented on this ref (pre-M1-3)" — backward
+compatibility for a workflow still pinned to such a `ref`, not the current
+state of `main`. With the default `allow-unimplemented: false`, that same
+pre-M1-3 run is reported as a real failure — a green job that checked
+nothing is worse than a red one that says so. A `ref` at or after M1-3
+(including the default, `main`) never takes this path at all.
 
 ## What the self-test workflow does and does not cover
 
