@@ -3,9 +3,12 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 <!-- badge placeholders: CI, PyPI, and the torch matrix land with M4 -->
 
-> **Status: M0 scaffold, nothing works yet.** The package installs, `compile-check
-> --version` and `compile-check --probe` run, and every other module is a typed
-> stub that raises `NotImplementedError`. Do not use this to check anything yet.
+> **Status: M1, the tool runs end to end with two of the five oracles.** Point it
+> at a model and it runs eager, `aot_eager`, and `inductor`, compares the numerics
+> and the output metadata, names the compilation stage a divergence first appears
+> in, and prints a report. The alias, grad, and graph oracles (M2) and the JSON,
+> Markdown, and pytest-case reports (M3) are still stubs; the report says which
+> checks did not run, so a missing oracle never reads as a passing one.
 
 Bring your own model; compile-check tells you whether `torch.compile` changed its
 answers, and if so hands you a minimal repro and a ready-to-file report. The tool is a
@@ -19,14 +22,39 @@ that the program under test is your own model rather than a generated one.
 ## What works today
 
 ```console
-$ compile-check --version
-compile-check 0.0.1.dev0
-
-$ compile-check --probe        # which torch APIs the oracles need are on your install
+$ compile-check path/to/model.py
 ```
 
-Everything else exits 2 with "not implemented in M0". The plan, including the full
-oracle design and the milestone schedule, is in [PLAN.md](PLAN.md).
+The file needs a module-level `model` (an `nn.Module`) or `fn` (a callable), and a
+module-level `inputs` or a `get_inputs()` that returns them; `--entry` and `--inputs`
+override both. The run prints an environment block, a per-backend table, an
+oracle-by-backend table, the findings, and the stage verdict, then exits 0 for clean,
+1 for a finding in a `--fail-on` category, and 2 for a tool error.
+
+```console
+$ compile-check tests/fixtures/mlp.py
+...
+checks
+  oracle    fail-on  aot_eager         inductor
+  numerics  yes      pass              pass
+  alias     yes      not yet           not yet
+  metadata  yes      pass              pass
+  grad      yes      not yet           not yet
+  graph     no       not yet           not yet
+
+stage
+  clean: no backend diverged from eager across 2 lanes
+
+$ compile-check --probe        # which torch APIs the oracles need are on your install
+$ compile-check --version
+```
+
+The stage verdict names the first backend that diverges, which is where the
+divergence becomes observable and not necessarily where the fix belongs; the report
+says so every time, because the two are not the same question.
+
+The plan, including the full oracle design and the milestone schedule, is in
+[PLAN.md](PLAN.md).
 
 ## What pointing the tool at a file does to your interpreter
 

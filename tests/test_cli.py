@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import os
 import re
 import subprocess
 import sys
@@ -13,6 +14,7 @@ import pytest
 from compile_check import __version__
 from compile_check.cli import (
     EXIT_ERROR,
+    EXIT_FINDING,
     EXIT_OK,
     build_parser,
     format_probe_table,
@@ -22,6 +24,7 @@ from compile_check.cli import (
 )
 from compile_check.env import PROBED_APIS
 from compile_check.oracles import Finding
+from compile_check.report.terminal import DEFAULT_MAX_FINDINGS
 from compile_check.results import BackendResult, RunSet
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -95,14 +98,18 @@ def test_format_probe_table_two_columns():
     ]
 
 
-def test_unknown_path_exits_two(capsys):
+def test_a_path_that_does_not_exist_is_a_tool_error(capsys):
     assert main(["model.py"]) == EXIT_ERROR
-    assert "not implemented yet" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "Traceback" not in err
+    assert "no such file: model.py" in err
 
 
-def test_no_arguments_exits_two(capsys):
+def test_no_arguments_exits_two_with_the_usage(capsys):
     assert main([]) == EXIT_ERROR
-    assert "not implemented yet" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "needs a target" in err
+    assert "usage: compile-check" in err
 
 
 def test_full_v1_flag_surface_parses():
@@ -137,6 +144,11 @@ def test_full_v1_flag_surface_parses():
             "600",
             "--baseline",
             "graph-baseline.json",
+            "--no-grad",
+            "--max-findings",
+            "3",
+            "--color",
+            "never",
         ]
     )
     assert args.path == "model.py"
@@ -156,6 +168,9 @@ def test_full_v1_flag_surface_parses():
     assert args.fp64_oracle is True
     assert args.budget == pytest.approx(600.0)
     assert args.baseline == "graph-baseline.json"
+    assert args.no_grad is True
+    assert args.max_findings == 3
+    assert args.color == "never"
 
 
 def test_defaults_match_the_plan():
@@ -166,6 +181,9 @@ def test_defaults_match_the_plan():
     assert args.seed == 0
     assert args.fullgraph is False
     assert args.dynamic is False
+    assert args.no_grad is False
+    assert args.max_findings == DEFAULT_MAX_FINDINGS
+    assert args.color == "auto"
 
 
 def test_bad_device_is_a_tool_error():
@@ -181,22 +199,19 @@ def test_every_module_imports():
 
 def test_stubs_raise_not_implemented():
     # discover.py and runner.py landed in M1-1, the numerics and metadata
-    # oracles in M1-2, and each is covered by its own test module; what is left
-    # below is what M2 and M3 still owe.
-    from compile_check import localize, minimize
+    # oracles in M1-2, and localize.py plus report/terminal.py in M1-3; each is
+    # covered by its own test module. What is left below is what M2 and M3
+    # still owe.
+    from compile_check import minimize
     from compile_check.oracles import alias, grad, graph
     from compile_check.report import json as json_report
-    from compile_check.report import markdown, pytest_case, terminal
+    from compile_check.report import markdown, pytest_case
 
-    with pytest.raises(NotImplementedError):
-        localize.implicated_stage("inductor")
     with pytest.raises(NotImplementedError):
         minimize.minimize(None, None, lambda _fn, _inputs: True)
     for oracle in (alias, grad, graph):
         with pytest.raises(NotImplementedError):
             oracle.check({}, {})
-    with pytest.raises(NotImplementedError):
-        terminal.render({})
     with pytest.raises(NotImplementedError):
         json_report.dump({}, Path("out.json"))
     with pytest.raises(NotImplementedError):
@@ -251,20 +266,24 @@ def test_run_only_reports_the_oracles_and_finds_nothing_on_a_clean_model(capsys)
     code = main([str(FIXTURES / "mlp.py"), "--run-only", "--backends", "eager,aot_eager"])
     out = capsys.readouterr().out
     assert code == EXIT_OK
-    # The two that run, and the two that were asked for and do not exist yet:
-    # "not checked" must not read as "checked and clean".
+    # The two that run, and the three that do not exist yet: "not checked"
+    # must not read as "checked and clean".
     assert "oracles    numerics, metadata" in out
-    assert "not implemented yet, nothing checked: alias, grad" in out
+    assert "not implemented yet, nothing checked: alias, grad, graph" in out
     assert "findings\n  none" in out
 
 
-def test_run_only_can_restrict_the_oracles_it_runs(capsys):
+def test_fail_on_narrows_the_verdict_not_the_checks(capsys):
+    # The CEO decision behind M1-3: --fail-on selects which categories turn a
+    # finding into exit 1. Every implemented oracle runs whatever it says, so a
+    # narrowed exit rule never narrows what the report looked at.
     code = main(
         [str(FIXTURES / "mlp.py"), "--run-only", "--backends", "eager", "--fail-on", "metadata"]
     )
     out = capsys.readouterr().out
     assert code == EXIT_OK
-    assert "oracles    metadata\n" in out
+    assert "oracles    numerics, metadata" in out
+    assert "fail-on    metadata\n" in out
 
 
 def test_run_only_rejects_an_unknown_fail_on_category(capsys):
@@ -413,3 +432,285 @@ def test_run_only_without_an_eager_lane_says_nothing_was_compared(capsys):
     out = capsys.readouterr().out
     assert code == EXIT_OK
     assert "findings\n  not checked: this run has no eager lane" in out
+
+
+# --- the main path ----------------------------------------------------------
+
+
+def test_the_main_path_reports_a_clean_model_and_exits_zero(capsys):
+    code = main([str(FIXTURES / "mlp.py"), "--backends", "eager,aot_eager", "--color", "never"])
+    out = capsys.readouterr().out
+
+    assert code == EXIT_OK
+    assert out.startswith(f"compile-check {__version__}   target mlp:model")
+    assert "clean: no backend diverged from eager across 1 lanes" in out
+    assert "findings\n  none" in out
+    # The environment block a parity comparison needs (PLAN.md
+    # "Cross-architecture parity is a feature").
+    assert "machine   " in out
+    assert "caches    disabled (force_disable_caches=True)" in out
+    assert "\033[" not in out
+
+
+def test_the_main_path_reports_a_broken_model_as_the_model_and_exits_two(capsys):
+    code = main([str(FIXTURES / "raises.py"), "--backends", "eager,aot_eager", "--color", "never"])
+    captured = capsys.readouterr()
+
+    assert code == EXIT_ERROR
+    assert "the model raised RuntimeError under eager" in captured.out
+    assert "this target is broken on purpose" in captured.out
+    # Not "checked and clean": nothing was compared at all.
+    assert "not checked: nothing was compared" in captured.out
+    assert "findings\n  none" not in captured.out
+    # A recorded result, not a crash, so nothing goes to stderr.
+    assert captured.err == ""
+
+
+def test_a_synthetic_divergence_exits_one_and_names_the_stage(capsys, monkeypatch):
+    # The oracles cannot be made to fail on a correct model on demand, so the
+    # divergence is injected at the one seam that matters here: an oracle that
+    # reports. Everything downstream -- localization, the report, the exit code
+    # -- is the real thing.
+    from compile_check import oracles as oracles_module
+
+    class AlwaysFails:
+        name = "metadata"
+
+        def compare(self, eager, other, cfg):
+            del eager, cfg
+            return [
+                Finding(
+                    oracle="metadata",
+                    backend=other.backend,
+                    output_index=0,
+                    severity="fail",
+                    message="dtype differs: eager torch.int8, aot_eager torch.int64",
+                    details={"field": "dtype", "expected": "torch.int8", "got": "torch.int64"},
+                )
+            ]
+
+    monkeypatch.setitem(oracles_module.ORACLES, "metadata", AlwaysFails())
+    code = main([str(FIXTURES / "mlp.py"), "--backends", "eager,aot_eager", "--color", "never"])
+    out = capsys.readouterr().out
+
+    assert code == EXIT_FINDING
+    assert "first diverges at aot_eager, which implicates capture/AOTAutograd/decomposition" in out
+    # PLAN.md "Where divergence appears is not always where the fix belongs".
+    assert "not necessarily where the fix belongs" in out
+    assert "the bug is in" not in out
+    assert "[fail] aot_eager output[0]" in out
+    assert "dtype differs" in out
+
+
+def test_fail_on_decides_the_exit_code_without_narrowing_the_report(capsys, monkeypatch):
+    from compile_check import oracles as oracles_module
+
+    class AlwaysFails:
+        name = "metadata"
+
+        def compare(self, eager, other, cfg):
+            del eager, cfg
+            return [
+                Finding(
+                    oracle="metadata",
+                    backend=other.backend,
+                    output_index=0,
+                    severity="fail",
+                    message="dtype differs",
+                    details={},
+                )
+            ]
+
+    monkeypatch.setitem(oracles_module.ORACLES, "metadata", AlwaysFails())
+    code = main(
+        [
+            str(FIXTURES / "mlp.py"),
+            "--backends",
+            "eager,aot_eager",
+            "--fail-on",
+            "numerics",
+            "--color",
+            "never",
+        ]
+    )
+    out = capsys.readouterr().out
+
+    # The metadata oracle still ran and its finding is still reported...
+    assert "[fail] aot_eager output[0]" in out
+    assert "first diverges at aot_eager" in out
+    assert "metadata  no " in out
+    # ...but it is not a --fail-on category, so it does not fail the run.
+    assert code == EXIT_OK
+
+
+def test_a_compiled_lane_that_raised_exits_one_whatever_fail_on_says(capsys, monkeypatch):
+    # A lane that could not run is not a lane that passed, and an exception
+    # belongs to no oracle category, so --fail-on cannot switch this off.
+    from compile_check import runner as runner_module
+    from compile_check.results import CapturedException
+
+    real_run_backend = runner_module.run_backend
+
+    def sabotage(fn, example_inputs, backend, **kwargs):
+        result = real_run_backend(fn, example_inputs, backend, **kwargs)
+        if backend != "eager":
+            result.exception = CapturedException(
+                type="BackendCompilerFailed", message="synthetic", traceback=("...",)
+            )
+            result.outputs = []
+        return result
+
+    monkeypatch.setattr(runner_module, "run_backend", sabotage)
+    code = main(
+        [
+            str(FIXTURES / "mlp.py"),
+            "--backends",
+            "eager,aot_eager",
+            "--fail-on",
+            "graph",
+            "--color",
+            "never",
+        ]
+    )
+    out = capsys.readouterr().out
+
+    assert code == EXIT_FINDING
+    assert "raised BackendCompilerFailed" in out
+    assert "first diverges at aot_eager" in out
+
+
+def test_a_run_without_an_eager_lane_is_a_tool_error(capsys):
+    # PLAN.md "Runner semantics" makes eager the reference world; a run with no
+    # reference must not report clean.
+    code = main([str(FIXTURES / "mlp.py"), "--backends", "aot_eager", "--color", "never"])
+    out = capsys.readouterr().out
+
+    assert code == EXIT_ERROR
+    assert "no eager lane" in out
+    assert "not checked: nothing was compared" in out
+
+
+def test_the_main_path_shares_the_boundary_with_run_only(capsys):
+    # Carry-over (0): one _guarded_run(), so a bad backend name reads the same
+    # on both paths and neither shows a traceback.
+    plain = main([str(FIXTURES / "mlp.py"), "--backends", "eager,bogus"])
+    plain_err = capsys.readouterr().err
+    hidden = main([str(FIXTURES / "mlp.py"), "--run-only", "--backends", "eager,bogus"])
+    hidden_err = capsys.readouterr().err
+
+    assert plain == hidden == EXIT_ERROR
+    assert plain_err == hidden_err
+    assert "Traceback" not in plain_err
+    assert "unknown backend 'bogus'" in plain_err
+
+
+def test_the_main_path_says_which_flags_it_ignored(capsys, tmp_path):
+    code = main(
+        [
+            str(FIXTURES / "mlp.py"),
+            "--backends",
+            "eager",
+            "--json",
+            str(tmp_path / "out.json"),
+            "--md",
+            str(tmp_path / "report.md"),
+            "--color",
+            "never",
+        ]
+    )
+    err = capsys.readouterr().err
+
+    assert code == EXIT_OK
+    assert "--json is not implemented yet (it lands in M3), ignored" in err
+    assert "--md is not implemented yet (it lands in M3), ignored" in err
+    assert not (tmp_path / "out.json").exists()
+
+
+def test_no_grad_switches_the_backward_pass_off(capsys):
+    code = main([str(FIXTURES / "mlp.py"), "--run-only", "--backends", "eager", "--no-grad"])
+    out = capsys.readouterr().out
+
+    assert code == EXIT_OK
+    # The grads block only appears for a lane that ran a backward.
+    assert "grads" not in out
+
+
+def test_color_always_paints_and_never_does_not(capsys):
+    main([str(FIXTURES / "mlp.py"), "--backends", "eager", "--color", "always"])
+    painted = capsys.readouterr().out
+    main([str(FIXTURES / "mlp.py"), "--backends", "eager", "--color", "never"])
+    plain = capsys.readouterr().out
+
+    assert "\033[" in painted
+    assert "\033[" not in plain
+    assert re.sub(r"\033\[[0-9;]*m", "", painted) == plain
+
+
+def test_color_auto_follows_the_terminal_and_no_color(monkeypatch):
+    from compile_check.cli import _use_color
+
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    assert _use_color("auto") is True
+    assert _use_color("never") is False
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    assert _use_color("auto") is False
+    assert _use_color("always") is True
+
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+    assert _use_color("auto") is False
+
+
+def test_max_findings_caps_each_oracle_group(capsys, monkeypatch):
+    from compile_check import oracles as oracles_module
+
+    class ThreeFailures:
+        name = "metadata"
+
+        def compare(self, eager, other, cfg):
+            del eager, cfg
+            return [
+                Finding(
+                    oracle="metadata",
+                    backend=other.backend,
+                    output_index=index,
+                    severity="fail",
+                    message=f"synthetic divergence {index}",
+                    details={},
+                )
+                for index in range(3)
+            ]
+
+    monkeypatch.setitem(oracles_module.ORACLES, "metadata", ThreeFailures())
+    code = main(
+        [
+            str(FIXTURES / "mlp.py"),
+            "--backends",
+            "eager,aot_eager",
+            "--max-findings",
+            "1",
+            "--color",
+            "never",
+        ]
+    )
+    out = capsys.readouterr().out
+
+    assert code == EXIT_FINDING
+    assert "synthetic divergence 0" in out
+    assert "synthetic divergence 1" not in out
+    assert "2 more metadata findings not shown (--max-findings 1)" in out
+
+
+def test_the_cache_variable_is_set_before_the_run_and_recorded_in_the_report(capsys, monkeypatch):
+    # PLAN.md "Runner semantics": set before torch does any compiling. In this
+    # process torch is already imported by the time a test runs, so what is
+    # asserted here is that main() sets the variable and that the report says
+    # which mode was in force.
+    from compile_check.runner import CACHE_ENV_VAR
+
+    monkeypatch.delenv(CACHE_ENV_VAR, raising=False)
+    assert main([str(FIXTURES / "mlp.py"), "--backends", "eager", "--color", "never"]) == EXIT_OK
+    assert os.environ[CACHE_ENV_VAR] == "1"
+    assert "caches    disabled" in capsys.readouterr().out
