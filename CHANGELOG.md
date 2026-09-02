@@ -15,6 +15,26 @@ All notable changes to this project are documented here. The format follows
   surface".
 - CLI: the full v1 flag surface is parsed; `--version` and `--probe` work, every
   other invocation exits 2.
+- `compile_check.discover` and `compile_check.runner`: target resolution and the
+  per-backend run, with per-backend input clones, a compiler reset between
+  lanes, both calls timed, captured exceptions, and the optional `eager_fp64`
+  reference behind `--fp64-oracle`.
+- The numerics and metadata oracles, and the `Finding` / `OracleConfig` /
+  `Oracle` vocabulary they share.
+- `compile_check.localize`: the ablation ladder as a decision procedure, with a
+  `StageVerdict` that names the first diverging backend and the compilation
+  stage it implicates, worded "first diverges at" and never "the bug is in".
+- `compile_check.report.terminal`: the ANSI terminal report -- environment block
+  with the architecture, per-backend table, oracle-by-backend table, findings
+  grouped by oracle under `--max-findings`, the stage verdict, and a next-step
+  hint. `--color auto|always|never`, off when stdout is not a terminal or
+  `NO_COLOR` is set.
+- CLI main path: run, compare, localize, report, exit 0/1/2. `--fail-on` selects
+  which oracle categories turn a finding into exit 1 and never which oracles
+  run; a compiled backend that raised while eager did not is always exit 1.
+  `--no-grad` switches the backward pass off.
+- `BackendResult.second_call_exception`, so a lane that answers once and then
+  raises is recorded rather than only logged.
 - Tooling: ruff lint and format, mypy strict over `src/`, pytest, pre-commit, a
   `Makefile`, and a GitHub Actions matrix over Python 3.10 to 3.13 and torch
   stable and nightly on CPU.
