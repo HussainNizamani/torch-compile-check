@@ -14,6 +14,18 @@ a ``pyproject.toml`` dependency (``docs/validation.md`` "Extras" says why),
 so a target that needs a missing package is skipped, not treated as a tool
 error -- ``hf_tiny_bert.py`` is the only target that currently needs one.
 
+"Missing" covers two shapes, and the second one cost a run. A package that
+is not installed at all is caught up front by :func:`importlib.util.find_spec`.
+A package that *is* installed but cannot be imported the way the target
+imports it is caught after the fact: ``transformers`` 5 moved
+``from transformers import BertModel`` behind a lazy import that raises
+``ModuleNotFoundError``, ``find_spec`` said the package was there, and the
+target came back as a tool error rather than a skip (M4-2 estate run). Both
+are the same fact about the environment and both are reported as skipped
+with the reason, which is why the ``validation`` extra pins
+``transformers<5``: a skip says the row was not measured, and a tool error
+says the tool broke.
+
 Every real run is reported verbatim. A finding on a real model is not
 tuned away by adjusting a target or a tolerance to make it disappear; it is
 either a real compile-check finding (kept, and worth a look) or grounds to
@@ -52,6 +64,13 @@ BACKENDS = "eager,aot_eager,inductor"
 STAGE_RE = re.compile(r"^stage\n\s*(.+)$", re.MULTILINE)
 FINDING_RE = re.compile(r"^  (\w+)  \((\d+) fail\)", re.MULTILINE)
 EXIT_ERROR = 2
+
+# How an import failure of a validation extra shows up in the CLI's one-line
+# tool error: discovery re-raises the target's own exception with its class
+# name in the sentence (``compile_check.discover``). Matching the class name
+# *and* the package the target declared is what keeps this from swallowing a
+# real tool error that merely happens to mention importing.
+IMPORT_ERROR_RE = re.compile(r"\b(ModuleNotFoundError|ImportError)\b")
 
 
 @dataclass(frozen=True)
@@ -146,6 +165,23 @@ def run_target(spec: TargetSpec) -> TargetResult:
 
     if completed.returncode == EXIT_ERROR:
         first_line = next((line for line in completed.stderr.splitlines() if line.strip()), "")
+        if spec.requires_package is not None and _extra_failed_to_import(
+            completed.stderr + completed.stdout, spec.requires_package
+        ):
+            # Installed, and still not importable the way this target imports
+            # it. That is a fact about the environment, exactly like the
+            # package being absent, so it reads as a skip with the reason
+            # rather than as the tool falling over.
+            return TargetResult(
+                name=name,
+                status="skipped",
+                exit_code=None,
+                seconds=elapsed,
+                reason=(
+                    f"{spec.requires_package} is installed but this target could not "
+                    f"import it: {first_line or 'exit 2 with no stderr line to report'}"
+                ),
+            )
         return TargetResult(
             name=name,
             status="tool_error",
@@ -167,6 +203,16 @@ def run_target(spec: TargetSpec) -> TargetResult:
         stage=stage,
         seconds=elapsed,
     )
+
+
+def _extra_failed_to_import(output: str, package: str) -> bool:
+    """Did this run fail because the declared extra would not import?
+
+    Both halves are required. An ``ImportError`` on its own could be the tool
+    failing to import something of its own, and the package name on its own
+    appears in every message that quotes the target's path.
+    """
+    return bool(IMPORT_ERROR_RE.search(output)) and package in output
 
 
 def environment() -> dict[str, str]:
@@ -195,7 +241,11 @@ def render_table(results: list[TargetResult]) -> str:
     ]
     for result in results:
         if result.status == "skipped":
-            lines.append(f"| `{result.name}` | skipped | -- | -- | {result.reason} | -- |")
+            # A target skipped up front never ran and has no time; one skipped
+            # because its extra would not import did, and hiding that would
+            # make the two look like the same measurement.
+            seconds = "--" if result.seconds is None else f"{result.seconds:.1f}"
+            lines.append(f"| `{result.name}` | skipped | -- | -- | {result.reason} | {seconds} |")
             continue
         if result.status == "tool_error":
             lines.append(
@@ -232,10 +282,14 @@ target and regenerate instead.
 
 ```console
 python -m pip install -e ".[dev]"
-python -m pip install torchvision  # optional: enables the tv_* targets
-python -m pip install transformers  # optional: enables hf_tiny_bert
+python -m pip install -e ".[validation]"  # torchvision + transformers<5
 python validation/run.py
 ```
+
+Install `torchvision` from the same index as torch (see
+`docs/cross-arch.md`); a PyPI `torchvision` beside a `torch+cpu` wheel
+fails to load its compiled ops, and every `tv_*` target then reports a
+tool error rather than a result.
 
 `--targets name1,name2` runs a subset; the default is every target under
 `validation/targets/`. A result JSON lands in `validation/results/`, named
@@ -272,10 +326,18 @@ rather than for a numerics reason.
 `torchvision` and `transformers` are **not** `pyproject.toml` dependencies
 -- they exist only to build validation targets, and `compile-check` itself
 has exactly one runtime dependency (`torch`), per PLAN.md "Engineering
-decisions". A target whose package is missing is reported below as
-"skipped", not as a tool error; `hf_tiny_bert.py`'s own docstring has the
-detail on what importing it directly looks like without `transformers`
-installed.
+decisions". They are the `validation` extra instead.
+
+A target whose extra is missing is reported below as "skipped", not as a
+tool error, and that covers both ways an extra can be missing: not
+installed at all, and installed but not importable the way the target
+imports it. The second one is why the extra pins `transformers<5` --
+5.x moved `from transformers import BertModel` behind a lazy import that
+raises `ModuleNotFoundError`, `importlib.util.find_spec` reported the
+package as present, and `hf_tiny_bert` came back as a tool error, which
+reads as "compile-check is broken" rather than "this environment cannot
+build the target". `hf_tiny_bert.py`'s own docstring has the detail on
+what importing it directly looks like without `transformers` installed.
 
 ## Provenance
 

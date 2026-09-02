@@ -11,10 +11,14 @@ target and regenerate instead.
 
 ```console
 python -m pip install -e ".[dev]"
-python -m pip install torchvision  # optional: enables the tv_* targets
-python -m pip install transformers  # optional: enables hf_tiny_bert
+python -m pip install -e ".[validation]"  # torchvision + transformers<5
 python validation/run.py
 ```
+
+Install `torchvision` from the same index as torch (see
+`docs/cross-arch.md`); a PyPI `torchvision` beside a `torch+cpu` wheel
+fails to load its compiled ops, and every `tv_*` target then reports a
+tool error rather than a result.
 
 `--targets name1,name2` runs a subset; the default is every target under
 `validation/targets/`. A result JSON lands in `validation/results/`, named
@@ -51,10 +55,18 @@ rather than for a numerics reason.
 `torchvision` and `transformers` are **not** `pyproject.toml` dependencies
 -- they exist only to build validation targets, and `compile-check` itself
 has exactly one runtime dependency (`torch`), per PLAN.md "Engineering
-decisions". A target whose package is missing is reported below as
-"skipped", not as a tool error; `hf_tiny_bert.py`'s own docstring has the
-detail on what importing it directly looks like without `transformers`
-installed.
+decisions". They are the `validation` extra instead.
+
+A target whose extra is missing is reported below as "skipped", not as a
+tool error, and that covers both ways an extra can be missing: not
+installed at all, and installed but not importable the way the target
+imports it. The second one is why the extra pins `transformers<5` --
+5.x moved `from transformers import BertModel` behind a lazy import that
+raises `ModuleNotFoundError`, `importlib.util.find_spec` reported the
+package as present, and `hf_tiny_bert` came back as a tool error, which
+reads as "compile-check is broken" rather than "this environment cannot
+build the target". `hf_tiny_bert.py`'s own docstring has the detail on
+what importing it directly looks like without `transformers` installed.
 
 ## Provenance
 
@@ -67,9 +79,9 @@ CLI's own default), backends `eager,aot_eager,inductor`.
 
 | Target | Status | Exit | Findings by oracle | Stage | Seconds |
 |---|---|---|---|---|---|
-| `tv_resnet18` | clean | 0 | none | clean: no backend diverged from eager across 2 lanes | 24.7 |
-| `tv_mobilenet_v3_small` | clean | 0 | none | clean: no backend diverged from eager across 2 lanes | 51.1 |
-| `tv_efficientnet_b0` | clean | 0 | none | clean: no backend diverged from eager across 2 lanes | 64.5 |
-| `tv_vit_b_16_tiny` | clean | 0 | none | clean: no backend diverged from eager across 2 lanes | 15.7 |
-| `hf_tiny_bert` | clean | 0 | none | clean: no backend diverged from eager across 2 lanes | 17.9 |
-| `train_step_mlp` | clean | 0 | none | clean: no backend diverged from eager across 2 lanes | 9.4 |
+| `tv_resnet18` | clean | 0 | none | clean: no backend diverged from eager across 2 lanes | 28.5 |
+| `tv_mobilenet_v3_small` | clean | 0 | none | clean: no backend diverged from eager across 2 lanes | 61.2 |
+| `tv_efficientnet_b0` | clean | 0 | none | clean: no backend diverged from eager across 2 lanes | 91.1 |
+| `tv_vit_b_16_tiny` | clean | 0 | none | clean: no backend diverged from eager across 2 lanes | 18.9 |
+| `hf_tiny_bert` | clean | 0 | none | clean: no backend diverged from eager across 2 lanes | 19.4 |
+| `train_step_mlp` | clean | 0 | none | clean: no backend diverged from eager across 2 lanes | 10.7 |
