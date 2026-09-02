@@ -123,6 +123,34 @@ def test_a_dtype_finding_becomes_a_dtype_assertion():
     assert "# dtype differs: eager torch.int8, inductor torch.int64" in case
 
 
+def test_a_finding_past_the_first_leaf_is_indexed_through_tree_leaves():
+    # A dict (or any other non-sequence pytree) output does not support
+    # actual[N] by leaf position -- actual[1] on a two-key dict is a lookup for
+    # the key 1, and raises KeyError rather than comparing anything.
+    # tree_leaves(actual)[N] is the same flattening the runner indexed the
+    # finding against, so it names the leaf whatever shape actual is.
+    runset = make_runset()
+    runset.results["eager"] = BackendResult(backend="eager", outputs=[1, 2])
+    case = emitted(
+        runset,
+        [
+            finding(
+                "metadata",
+                output_index=1,
+                message="dtype differs: eager torch.int8, inductor torch.int64",
+                details={"field": "dtype", "expected": "torch.int8", "got": "torch.int64"},
+            )
+        ],
+    )
+
+    assert (
+        "self.assertEqual(torch.utils._pytree.tree_leaves(actual)[1].dtype, "
+        "torch.utils._pytree.tree_leaves(expected)[1].dtype)" in case
+    )
+    assert "actual[1]" not in case
+    assert "expected[1]" not in case
+
+
 @pytest.mark.parametrize(
     ("field", "assertion"),
     [

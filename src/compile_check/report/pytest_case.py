@@ -528,10 +528,21 @@ def _leaf(name: str, index: int | None, leaves: int) -> str:
     a finding naming a later index against a one-leaf run is a record that
     disagrees with itself, and collapsing the two to the same name would turn it
     into an assertion comparing something with itself.
+
+    A later leaf is read off the flattened pytree rather than off ``name``
+    directly. ``output_index`` is a position in the flattened return
+    (runner.py runs every output through ``tree_flatten``), and a plain
+    ``actual[N]`` only names that position when the return is itself a
+    sequence; for a dict -- or anything else ``tree_leaves`` walks rather than
+    subscripts by position -- ``actual[1]`` is a lookup for the key ``1`` and
+    raises ``KeyError`` instead of comparing the leaf the finding is about.
+    ``torch.utils._pytree.tree_leaves`` is the same flattening the runner used,
+    so indexing into it names the leaf the finding named, whatever shape the
+    return is.
     """
     if index is None or (index == 0 and leaves <= 1):
         return name
-    return f"{name}[{index}]"
+    return f"torch.utils._pytree.tree_leaves({name})[{index}]"
 
 
 def _entity(label: Any, leaves: int) -> str | None:
