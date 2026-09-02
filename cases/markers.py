@@ -246,8 +246,10 @@ MARKERS: dict[str, CaseMarker] = {
         oracle="graph",
         # The compiled lane raises rather than answering differently, so this
         # RED is exit 1 by the raised-lane rule and not by an oracle finding.
-        # The graph oracle lands in M3 and would report the break as graph
-        # health; it would not change this verdict.
+        # Since M3-1 the graph oracle also reports the break as graph health --
+        # it traces the same callable without the fullgraph demand and names the
+        # data-dependent branch in _kl_binomial_binomial -- and that is a
+        # diagnosis rather than a verdict: graph findings do not move the stage.
         manifests_as="raised_lane",
         signal="fullgraph capturability break, backend-independent",
         known_bad=("2.14.0", "2.15.0.dev20260901"),

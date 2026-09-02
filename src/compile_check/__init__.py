@@ -3,15 +3,14 @@
 Bring your own model; compile-check tells you whether ``torch.compile`` changed
 its answers, and if so hands you a minimal repro and a ready-to-file report.
 
-Status: M1 complete. The CLI's main path runs: :mod:`compile_check.discover`
-resolves a target, :mod:`compile_check.runner` runs it under every backend, the
-numerics and metadata oracles compare the lanes, :mod:`compile_check.localize`
+Status: M3 in progress. The CLI's main path runs: :mod:`compile_check.discover`
+resolves a target, :mod:`compile_check.runner` runs it under every backend, all
+five oracles of PLAN.md "Oracles" compare the lanes, :mod:`compile_check.localize`
 names the compilation stage a divergence first appears in, and
-:mod:`compile_check.report.terminal` prints the report. The alias, grad, and
-graph oracles (M2), the minimizer, and the JSON, Markdown, and pytest-case
-reports (M3) are still typed stubs that raise :class:`NotImplementedError`, and
-the terminal report says so rather than letting an unwritten check read as a
-check that passed.
+:mod:`compile_check.report.terminal` prints the report. The minimizer and the
+JSON, Markdown, and pytest-case reports (M3-2, M3-3) are still typed stubs that
+raise :class:`NotImplementedError`, and the terminal report says so rather than
+letting an unwritten feature read as a check that passed.
 """
 
 from __future__ import annotations

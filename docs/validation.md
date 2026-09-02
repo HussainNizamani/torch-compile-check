@@ -23,11 +23,14 @@ latest run.
 
 ## What "clean" means
 
-A target is "clean" when every backend's numerics, alias, and metadata
-checks against eager pass with no `fail`-severity finding (PLAN.md
-"Reports"), which is `compile-check`'s own exit 0. The grad and graph
-oracles are still stubs as of this run ("not yet" in every target's own
-`checks` table) and are not part of this table's "clean" reading.
+A target is "clean" when every backend's checks against eager pass with
+no `fail`-severity finding (PLAN.md "Reports"), which is
+`compile-check`'s own exit 0. All five oracles run as of this table --
+numerics, alias, metadata, grad, and graph -- so every one of them is
+part of its "clean" reading. Graph health is the one that is
+informational by default: without `--baseline` or `--fullgraph`, neither
+of which this suite passes, a graph break is reported as context and
+never as a verdict.
 
 ## Tolerance policy in force
 

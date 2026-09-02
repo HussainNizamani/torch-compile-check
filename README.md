@@ -3,13 +3,13 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 <!-- badge placeholders: CI, PyPI, and the torch matrix land with M4 -->
 
-> **Status: M2 in progress, the tool runs end to end with four of the five
-> oracles.** Point it at a model and it runs eager, `aot_eager`, and `inductor`,
-> compares the numerics, the aliasing and mutation behaviour, the output
-> metadata, and the gradients, names the compilation stage a divergence first
-> appears in, and prints a report. The graph oracle and the JSON, Markdown, and
-> pytest-case reports (M3) are still stubs; the report says which checks did not
-> run, so a missing oracle never reads as a passing one.
+> **Status: M3 in progress, the tool runs end to end with all five oracles.**
+> Point it at a model and it runs eager, `aot_eager`, and `inductor`, compares
+> the numerics, the aliasing and mutation behaviour, the output metadata, the
+> gradients, and the graph health, names the compilation stage a divergence
+> first appears in, and prints a report. The minimizer and the JSON, Markdown,
+> and pytest-case reports (M3-2, M3-3) are still stubs; the report says which
+> checks did not run, so a missing feature never reads as a passing one.
 
 Bring your own model; compile-check tells you whether `torch.compile` changed its
 answers, and if so hands you a minimal repro and a ready-to-file report. The tool is a
@@ -41,7 +41,7 @@ checks
   alias     yes      pass              pass
   metadata  yes      pass              pass
   grad      yes      pass              pass
-  graph     no       not yet           not yet
+  graph     no       pass              pass
 
 stage
   clean: no backend diverged from eager across 2 lanes
