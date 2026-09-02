@@ -29,6 +29,7 @@ from typing import Any
 
 from compile_check import __version__
 from compile_check.localize import GRAPH_ORACLE, MODEL, NO_REFERENCE, StageVerdict
+from compile_check.minimize import Minimization
 from compile_check.oracles import (
     DEFAULT_GRAD_TOL_FACTOR,
     ORACLE_NAMES,
@@ -53,6 +54,10 @@ DEFAULT_MAX_FINDINGS = 10
 _WIDTH = 96
 
 _INDENT = "  "
+
+# The label column the environment block and the minimized block share, so a
+# reader's eye lands in the same place in both.
+_LABEL_PAD = " " * 10
 
 
 def _wrap(text: str, *, indent: str = "") -> list[str]:
@@ -131,6 +136,7 @@ def render(
     grad_tol_factor: float = DEFAULT_GRAD_TOL_FACTOR,
     baseline: str | None = None,
     max_findings: int = DEFAULT_MAX_FINDINGS,
+    minimized: Minimization | None = None,
     color: bool = False,
 ) -> str:
     """Render one run as the terminal report.
@@ -156,6 +162,10 @@ def render(
             breaks", and the two must not read alike.
         max_findings: how many findings to print per oracle group. The rest are
             counted, never silently dropped.
+        minimized: what ``--minimize`` did, or ``None`` when it was not asked
+            for. ``None`` prints no block at all, which is the difference
+            between a minimizer that found nothing to reduce and one that was
+            never run.
         color: emit ANSI colour. ``cli.py`` decides this from ``--color`` and
             whether stdout is a TTY.
 
@@ -169,8 +179,11 @@ def render(
         _backends(runset, paint),
         _checks(runset, findings, fail_on, paint),
         _findings(findings, max_findings, verdict.compared, paint),
+        # Under the findings and above the verdict: it is a statement about one
+        # finding, and the verdict is the conclusion the whole report ends on.
+        _minimized(minimized, paint),
         _stage(verdict, paint),
-        _next_steps(paint),
+        _next_steps(minimized, paint),
     ]
     return "\n\n".join(block for block in blocks if block)
 
@@ -527,19 +540,113 @@ def _stage(verdict: StageVerdict, paint: Paint) -> str:
     return _section("stage", lines, paint)
 
 
-def _next_steps(paint: Paint) -> str:
-    """What to run next. Honest about what does not exist yet."""
-    return _section(
-        "next",
-        [
-            paint(line, "dim")
-            for line in _wrap(
-                "run with --json to save the result, --md for an issue draft, and "
-                "--emit-test for a regression test (the minimizer lands in M3-3)"
+def _minimized(minimized: Minimization | None, paint: Paint) -> str:
+    """What ``--minimize`` reduced the case to, and what it could not.
+
+    Five rows at most, each a fact the reader acts on: which finding was kept
+    alive, what happened to the inputs, what happened to the model, why the pass
+    stopped early if it did, and the accuracy-minifier handoff of PLAN.md's step
+    4. A row with nothing to say is not printed; a row that could not do its job
+    says so rather than being absent, which is the same rule the checks table
+    plays by.
+    """
+    if minimized is None:
+        return ""
+    if minimized.finding is None:
+        return _section(
+            "minimized",
+            _wrap(f"nothing to minimize: {minimized.reason}"),
+            paint,
+        )
+
+    rows: list[tuple[str, list[str]]] = [("finding", [_minimized_finding(minimized.finding)])]
+    if not minimized.reproduced:
+        rows.append(("control", _prose(minimized.notes)))
+        rows.append(("minifier", _prose([minimized.handoff])))
+        return _section("minimized", _rows(rows), paint)
+
+    # Python's own tuple repr, singleton comma and all: a shape printed as (2)
+    # reads as a number rather than as a one-dimensional tensor.
+    inputs = [f"leaf {s.index}  {s.before} -> {s.after}" for s in minimized.shrinks]
+    model = [f"{stub.path} ({stub.module}) -> torch.nn.Identity()" for stub in minimized.stubs]
+    model += [f"kept {k.path} ({k.module}): {k.reason}" for k in minimized.kept]
+    if inputs:
+        rows.append(("inputs", inputs))
+    if model:
+        # Wrapped, because a "kept" line carries a sentence: a real model's
+        # `kept layer2.0.downsample.0 (Conv2d): replacing it raised ...` runs
+        # past the width, and _wrap never breaks the dotted path itself.
+        rows.append(("model", _prose(model)))
+    if minimized.notes:
+        rows.append(("notes", _prose(minimized.notes)))
+    if minimized.partial and minimized.partial_reason is not None:
+        # The word "partial" is the point of the row: a minimization that ran
+        # out of budget has not shown that what is left is the smallest case.
+        rows.append(
+            (
+                "partial",
+                _prose(
+                    [
+                        f"{minimized.partial_reason}, so this result is partial: what is left "
+                        "still reproduces, and there may be more to remove"
+                    ]
+                ),
             )
-        ],
-        paint,
+        )
+    rows.append(
+        (
+            "cost",
+            [
+                f"{minimized.steps} candidate re-run{'' if minimized.steps == 1 else 's'} "
+                f"in {minimized.seconds:.1f}s"
+            ],
+        )
     )
+    rows.append(("minifier", _prose([minimized.handoff])))
+    return _section("minimized", _rows(rows), paint)
+
+
+def _minimized_finding(finding: Finding) -> str:
+    """The finding a minimization kept alive, as one labelled line."""
+    where = "the run" if finding.output_index is None else f"output[{finding.output_index}]"
+    field_name = finding.details.get("field")
+    named = f"   field {field_name}" if isinstance(field_name, str) else ""
+    return f"[{finding.severity}] {finding.oracle} {finding.backend} {where}{named}"
+
+
+def _rows(rows: Sequence[tuple[str, Sequence[str]]]) -> list[str]:
+    """Label-and-values rows, the label written once and the rest lined up."""
+    lines: list[str] = []
+    for label, values in rows:
+        for index, value in enumerate(values):
+            lines.append(f"{label if index == 0 else '':<{len(_LABEL_PAD)}}{value}")
+    return lines
+
+
+def _prose(sentences: Iterable[str]) -> list[str]:
+    """Sentences wrapped to fit under the label column, the indent taken back off.
+
+    Wrapped *with* the ten-character indent so the line length is right, then
+    stripped of it, because :func:`_rows` is what puts a label or a blank in
+    that column. Going through :func:`_wrap` rather than ``textwrap`` directly
+    is what keeps a path or an identifier from being cut mid-token.
+    """
+    lines: list[str] = []
+    for sentence in sentences:
+        lines += [line[len(_LABEL_PAD) :] for line in _wrap(sentence, indent=_LABEL_PAD)]
+    return lines
+
+
+def _next_steps(minimized: Minimization | None, paint: Paint) -> str:
+    """What to run next. Honest about what has and has not been done."""
+    text = (
+        "run with --json to save the result, --md for an issue draft, and --emit-test for a "
+        "regression test; --budget SECONDS bounds the minimizer"
+        if minimized is not None
+        else "run with --json to save the result, --md for an issue draft, --emit-test for a "
+        "regression test, and --minimize to shrink the case first"
+    )
+    return _section("next", [paint(line, "dim") for line in _wrap(text)], paint)
 
 
 def _section(title: str, lines: Sequence[str], paint: Paint) -> str:

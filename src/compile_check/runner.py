@@ -54,6 +54,7 @@ __all__ = [
     "FP64_BACKEND",
     "RunnerError",
     "available_backends",
+    "lane_module",
     "run_all",
     "run_backend",
     "run_fp64_reference",
@@ -279,7 +280,7 @@ def run_all(
         )
     for backend in backends:
         log.debug("running backend %s", backend)
-        lane_fn, copy_error = _lane_module(torch, fn, share_module)
+        lane_fn, copy_error = lane_module(fn, share=share_module)
         if copy_error is not None:
             runset.module_copy_error = copy_error
         runset.results[backend] = run_backend(
@@ -296,7 +297,7 @@ def run_all(
     return runset
 
 
-def _lane_module(torch: Any, fn: Any, share: bool) -> tuple[Any, str | None]:
+def lane_module(fn: Any, *, share: bool = False) -> tuple[Any, str | None]:
     """The module object one lane runs against: its own copy, or the shared one.
 
     PLAN.md "Runner semantics" isolates the *inputs* per backend so that a
@@ -317,6 +318,17 @@ def _lane_module(torch: Any, fn: Any, share: bool) -> tuple[Any, str | None]:
     A plain callable is handed back as it is. A function has no state to isolate,
     and PLAN.md's discovery convention makes ``nn.Module`` the stateful case.
 
+    Public since M3-3, because the minimizer is the second caller: every
+    candidate it evaluates runs two lanes of its own
+    (:func:`compile_check.minimize.reproducer`), and a minimizer that shared one
+    module between them would measure the same leak this function exists to
+    stop.
+
+    Args:
+        fn: the target the lane runs.
+        share: hand back the object itself instead of a copy
+            (``--share-module``).
+
     Returns:
         The object this lane runs against, and the reason the copy did not
         happen when one was wanted -- ``None`` when it did, or when there was
@@ -324,6 +336,7 @@ def _lane_module(torch: Any, fn: Any, share: bool) -> tuple[Any, str | None]:
         because the report's environment block has to state what actually
         happened, not what the flags asked for (M3 brief).
     """
+    torch = importlib.import_module("torch")
     if share or not isinstance(fn, torch.nn.Module):
         return fn, None
     try:
@@ -434,6 +447,7 @@ def run_backend(
     fullgraph: bool = False,
     dynamic: bool = False,
     grad: bool = True,
+    measure_graphs: bool = True,
 ) -> BackendResult:
     """Run ``fn`` under one backend and return everything the oracles compare.
 
@@ -443,6 +457,15 @@ def run_backend(
 
     ``backend`` is a torch.compile backend name, or one of
     :data:`EAGER_BACKENDS`, which are called directly instead.
+
+    ``measure_graphs`` is the one thing a caller can switch off. The graph
+    health of PLAN.md "graph" costs a third trace through the target under
+    ``torch._dynamo.explain``, and only the graph oracle reads it; the minimizer
+    of M3-3 re-runs a lane once per candidate and asks for it only when the
+    finding it is shrinking is a graph finding. A lane that skipped the pass
+    records :attr:`~compile_check.results.BackendResult.graph_health` as
+    ``None``, which the graph oracle already reads as "not measured" rather
+    than as "no graph breaks".
     """
     torch = importlib.import_module("torch")
     result = BackendResult(backend=backend)
@@ -489,16 +512,17 @@ def run_backend(
         # raises *because* the graph broke, and the explain pass below is what
         # names the line it broke on. There was no repeat call, so there is no
         # recompile sample to carry.
-        result.graph_health = _graph_health(
-            torch,
-            fn,
-            example_inputs,
-            kwargs or {},
-            backend=backend,
-            device=device,
-            seed=seed,
-            unique_graphs=(None, None),
-        )
+        if measure_graphs:
+            result.graph_health = _graph_health(
+                torch,
+                fn,
+                example_inputs,
+                kwargs or {},
+                backend=backend,
+                device=device,
+                seed=seed,
+                unique_graphs=(None, None),
+            )
         return result
     result.first_call_s = time.perf_counter() - started
 
@@ -547,16 +571,17 @@ def run_backend(
     # Last, because it runs the target a third time. Everything the other
     # oracles read -- the outputs, the input snapshots, the gradients -- has
     # been taken by now, so a target that mutates state cannot reach any of it.
-    result.graph_health = _graph_health(
-        torch,
-        fn,
-        example_inputs,
-        kwargs or {},
-        backend=backend,
-        device=device,
-        seed=seed,
-        unique_graphs=(unique_before, unique_after),
-    )
+    if measure_graphs:
+        result.graph_health = _graph_health(
+            torch,
+            fn,
+            example_inputs,
+            kwargs or {},
+            backend=backend,
+            device=device,
+            seed=seed,
+            unique_graphs=(unique_before, unique_after),
+        )
     return result
 
 

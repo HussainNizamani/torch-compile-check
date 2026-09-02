@@ -154,6 +154,39 @@ def test_an_entry_bound_inside_a_block_falls_back_to_the_whole_file():
     assert repro.inputs_expr == "get_inputs()"
 
 
+def test_the_whole_file_fallback_still_hands_its_future_imports_out():
+    # M3-3 defect fix. `from __future__` is only legal directly under a module
+    # docstring, and the fallback used to leave it in the middle of the block --
+    # so report/pytest_case.py, which pastes that block into a file of its own,
+    # emitted a test that did not parse at all. Proven by parsing an emitted-
+    # shaped file rather than by looking at the fields.
+    text = (
+        '"""A target whose entry point is bound inside a block."""\n'
+        "from __future__ import annotations\n\n"
+        "import torch\n\n"
+        "with torch.no_grad():\n"
+        "    model = torch.nn.Identity()\n\n"
+        "inputs = (torch.ones(2),)\n"
+    )
+    repro = extract(source(text, entry="model"))
+
+    assert repro is not None
+    assert repro.complete is False
+    assert repro.future_imports == ("from __future__ import annotations",)
+    assert "from __future__" not in repro.source
+    assert "with torch.no_grad():" in repro.source
+    # The shape the emitter builds: docstring, futures, imports, then the block.
+    compile(
+        '"""Emitted."""\n\n'
+        + "\n".join(repro.future_imports)
+        + "\n\nimport unittest\n\n\n"
+        + repro.source
+        + "\n",
+        "<emitted>",
+        "exec",
+    )
+
+
 def test_a_file_that_no_longer_parses_falls_back_to_its_text():
     repro = extract(source("def fn(:\n"))
 

@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from compile_check.localize import localize
+from compile_check.minimize import Minimization, Shrink, Stub
 from compile_check.oracles import Finding
 from compile_check.report.pytest_case import emit, select
 from compile_check.results import BackendResult, CapturedException, RunSet, TargetSource
@@ -472,3 +473,134 @@ def test_the_non_standalone_form_is_the_class_alone():
     assert "import unittest" not in case
     assert "def fn(x):" not in case
     assert "class TestSample(unittest.TestCase):" in case
+
+
+# --- the minimized target ---------------------------------------------------
+
+
+SEQUENTIAL_MODULE = """\
+import torch
+from torch import nn
+
+
+class Tiny(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.net = nn.Sequential(nn.Linear(4, 4), nn.ReLU())
+
+    def forward(self, x):
+        return self.net(x)
+
+
+model = Tiny()
+inputs = (torch.ones(8, 4),)
+"""
+
+
+def minimization(top: Finding, **overrides) -> Minimization:
+    """A minimization aimed at ``top``, with whatever the test changes."""
+    fields = {
+        "finding": top,
+        "reproduced": True,
+        "shrinks": (Shrink(index=0, before=(8, 4), after=(1, 4)),),
+        "stubs": (Stub(path="net.1", module="ReLU"),),
+        "handoff": "handed off",
+    }
+    fields.update(overrides)
+    return Minimization(**fields)
+
+
+def test_the_factory_slices_the_leaf_the_minimizer_shrank():
+    top = finding("numerics")
+    case = emitted(make_runset(), [top], minimized=minimization(top, stubs=()))
+
+    # Through tree_flatten, because output_index and the shrink index are both
+    # positions in the flattened inputs, and a dict input has no [1].
+    assert "leaves, spec = torch.utils._pytree.tree_flatten((torch.ones(4),))" in case
+    assert "leaves[0] = leaves[0][:1]" in case
+    assert "torch.utils._pytree.tree_unflatten(leaves, spec)" in case
+    assert "leaf 0 (8, 4) -> (1, 4)" in case
+
+
+def test_the_stub_lines_open_the_test_method():
+    top = finding("numerics")
+    case = emitted(
+        make_runset(SEQUENTIAL_MODULE, entry="model", name="m:model", is_module=True),
+        [top],
+        minimized=minimization(top, shrinks=()),
+    )
+    body = case.split("def test_", 1)[1].splitlines()
+
+    # In the method, because PLAN.md "Regression test emission" makes the method
+    # body the part a maintainer lifts into the inductor suite.
+    assert body[1].strip() == (
+        "# compile-check replaced 1 child module with a passthrough; it still reproduced."
+    )
+    assert body[2].strip() == (
+        'setattr(model.get_submodule("net"), "1", torch.nn.Identity())  # was ReLU'
+    )
+    # And the two lanes come after it, so the stub is in place when they run.
+    assert body[3].strip().startswith("expected = model(")
+
+
+def test_a_child_whose_name_is_not_an_identifier_uses_setattr():
+    # A Sequential's children are named "0" and "1", which cannot be written as
+    # an attribute; a top-level child can.
+    top = finding("numerics")
+    case = emitted(
+        make_runset(SEQUENTIAL_MODULE, entry="model", name="m:model", is_module=True),
+        [top],
+        minimized=minimization(
+            top,
+            shrinks=(),
+            stubs=(Stub(path="net.1", module="ReLU"), Stub(path="net", module="Sequential")),
+        ),
+    )
+    assert 'setattr(model.get_submodule("net"), "1", torch.nn.Identity())  # was ReLU' in case
+    assert "model.net = torch.nn.Identity()  # was Sequential" in case
+
+
+def test_the_header_says_what_was_minimized():
+    top = finding("numerics")
+    case = emitted(make_runset(), [top], minimized=minimization(top))
+    assert "Minimized: 1 child module replaced with torch.nn.Identity() and 1 input shrunk." in case
+
+
+def test_a_minimization_that_reduced_nothing_leaves_the_file_alone():
+    top = finding("numerics")
+    plain = emitted(make_runset(), [top])
+    with_record = emitted(make_runset(), [top], minimized=minimization(top, shrinks=(), stubs=()))
+    assert with_record == plain
+
+
+def test_a_minimization_whose_control_did_not_reproduce_is_not_used():
+    top = finding("numerics")
+    plain = emitted(make_runset(), [top])
+    stale = emitted(make_runset(), [top], minimized=minimization(top, reproduced=False))
+    assert stale == plain
+
+
+def test_a_minimization_aimed_at_another_finding_is_not_used():
+    # The emitter writes about the top finding; a record for a different one
+    # describes a case this test is not about.
+    top = finding("numerics")
+    other = finding("metadata", details={"field": "dtype"})
+    plain = emitted(make_runset(), [top])
+    mismatched = emitted(make_runset(), [top], minimized=minimization(other))
+    assert mismatched == plain
+
+
+def test_the_minimized_file_is_still_valid_python_in_the_markdown_form():
+    top = finding("numerics")
+    case = emit(
+        make_runset(SEQUENTIAL_MODULE, entry="model", name="m:model", is_module=True),
+        [top],
+        localize(make_runset(), [top]),
+        standalone=False,
+        minimized=minimization(top),
+    )
+    assert case is not None
+    # The non-standalone form has no imports of its own, so it is checked as a
+    # fragment: parsed, not compiled against the names it refers to.
+    ast.parse(case)
+    assert "leaves[0] = leaves[0][:1]" in case

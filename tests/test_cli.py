@@ -133,6 +133,7 @@ def test_full_v1_flag_surface_parses():
             "report.md",
             "--emit-test",
             "test_case.py",
+            "--minimize",
             "--fail-on",
             "numerics,alias,metadata,grad,graph",
             "--fullgraph",
@@ -169,6 +170,7 @@ def test_full_v1_flag_surface_parses():
     assert args.json == "out.json"
     assert args.md == "report.md"
     assert args.emit_test == "test_case.py"
+    assert args.minimize is True
     assert args.fail_on == "numerics,alias,metadata,grad,graph"
     assert args.fullgraph is True
     assert args.dynamic is True
@@ -202,6 +204,9 @@ def test_defaults_match_the_plan():
     assert args.json is None
     assert args.md is None
     assert args.emit_test is None
+    # PLAN.md "Minimizer, v1": the pass runs only when it is asked for.
+    assert args.minimize is False
+    assert args.budget is None
     assert args.grad_tol_factor == pytest.approx(DEFAULT_GRAD_TOL_FACTOR)
     assert args.max_findings == DEFAULT_MAX_FINDINGS
     assert args.color == "auto"
@@ -218,16 +223,20 @@ def test_every_module_imports():
         assert importlib.import_module(name) is not None
 
 
-def test_stubs_raise_not_implemented():
-    # discover.py and runner.py landed in M1-1, the numerics and metadata
-    # oracles in M1-2, localize.py plus report/terminal.py in M1-3, the alias
-    # oracle in M2-1, the grad oracle in M2-2, the graph oracle in M3-1, and the
-    # three report formats in M3-2; each is covered by its own test module. What
-    # is left below is what M3-3 still owes: the minimizer.
-    from compile_check import minimize
-
-    with pytest.raises(NotImplementedError):
-        minimize.minimize(None, None, lambda _fn, _inputs: True)
+def test_no_module_is_a_stub_any_more():
+    # M0-1 shipped one NotImplementedError per module in PLAN.md "Package
+    # layout", each naming the milestone it lands in: discovery and the runner
+    # in M1-1, the numerics and metadata oracles in M1-2, localization and the
+    # terminal report in M1-3, the alias oracle in M2-1, the grad oracle in
+    # M2-2, the graph oracle in M3-1, the three report formats in M3-2, and the
+    # minimizer in M3-3. This is the assertion that the list is now empty, and
+    # it is a search rather than a call because there is no stub left to call.
+    stubs = sorted(
+        str(path.relative_to(REPO_ROOT))
+        for path in (REPO_ROOT / "src" / "compile_check").rglob("*.py")
+        if "raise NotImplementedError" in path.read_text(encoding="utf-8")
+    )
+    assert stubs == []
 
 
 def test_importing_the_package_does_not_import_torch():
@@ -815,14 +824,22 @@ def test_the_main_path_says_which_flags_it_ignored(capsys, tmp_path):
     err = capsys.readouterr().err
 
     assert code == EXIT_OK
-    assert "--budget is not implemented yet (it lands in M3), ignored" in err
-    # --json and --md are no longer among them: they landed in M3-2, as
-    # --baseline did with the graph oracle in M3-1.
-    assert "--json is not implemented" not in err
-    assert "--md is not implemented" not in err
-    assert "--baseline is not implemented" not in err
+    # --budget bounds the minimizer and nothing else, so a run without
+    # --minimize has nothing for it to bound and is told so.
+    assert "--budget bounds --minimize, which this run did not ask for; ignored" in err
+    # Nothing in the v1 surface is unimplemented any more: --baseline landed in
+    # M3-1, --json and --md in M3-2, and --budget in M3-3 with the minimizer.
+    assert "is not implemented yet" not in err
     assert (tmp_path / "out.json").exists()
     assert (tmp_path / "report.md").exists()
+
+
+def test_a_budget_beside_the_minimizer_is_not_reported_as_ignored(capsys):
+    code = main([str(FIXTURES / "mlp.py"), "--backends", "eager", "--minimize", "--budget", "60"])
+    err = capsys.readouterr().err
+
+    assert code == EXIT_OK
+    assert "--budget" not in err
 
 
 # --- the graph baseline, end to end ----------------------------------------
@@ -1280,7 +1297,10 @@ def test_the_three_report_flags_write_their_files_on_a_red_case(capsys, tmp_path
     # the artifacts are written either way, which is what this pins.
     assert code in {EXIT_OK, EXIT_FINDING}
     document = json.loads((out / "out.json").read_text())
-    assert document["schema_version"] == 1
+    assert document["schema_version"] == 2
+    # --minimize was not passed, so the minimizer did not run: null rather than
+    # a record that reduced nothing, which is a different statement.
+    assert document["minimized"] is None
     assert document["target"]["name"] == "dtype_promotion:fn"
     assert document["exit_code"] == code
     draft = (out / "draft.md").read_text()
@@ -1518,3 +1538,183 @@ def test_the_json_written_by_a_real_run_validates_and_round_trips(tmp_path):
     assert validate(document) == []
     assert document["verdict"]["clean"] is True
     assert document["environment"]["machine"] == os.uname().machine
+
+
+# --- the minimizer, end to end ---------------------------------------------
+
+DIVERGENT = FIXTURES / "divergent_child.py"
+PERTURBS = "compile_check_perturbs"
+
+
+def test_minimize_on_a_clean_run_prints_the_block_and_says_there_is_nothing(capsys):
+    # PLAN.md "Minimizer, v1": the pass runs only after a finding. A clean run
+    # still gets the block, because "asked and had nothing to do" and "not
+    # asked" are different facts and the report has to be able to say the first.
+    code = main([str(FIXTURES / "mlp.py"), "--backends", "eager,aot_eager", "--minimize"])
+    out = capsys.readouterr().out
+
+    assert code == EXIT_OK
+    assert "minimized" in out
+    assert "nothing to minimize: this run has no fail-severity finding" in out
+
+
+def test_minimize_is_silent_when_it_was_not_asked_for(capsys):
+    code = main([str(FIXTURES / "mlp.py"), "--backends", "eager,aot_eager"])
+    out = capsys.readouterr().out
+
+    assert code == EXIT_OK
+    assert "\nminimized\n" not in out
+
+
+def test_minimize_reports_the_stubbed_children_and_the_shrunk_input(capsys):
+    code = main(
+        [str(DIVERGENT), "--backends", f"eager,{PERTURBS}", "--minimize", "--color", "never"]
+    )
+    out = capsys.readouterr().out
+
+    assert code == EXIT_FINDING
+    assert "head (Linear) -> torch.nn.Identity()" in out
+    assert "tail (Linear) -> torch.nn.Identity()" in out
+    assert "kept middle (Guilty): the finding did not survive the replacement" in out
+    assert "leaf 0  (8, 4) -> (1, 4)" in out
+    assert "TORCHDYNAMO_REPRO_AFTER=aot" in " ".join(out.split())
+
+
+def test_minimize_does_not_move_the_verdict_or_the_exit_code(capsys):
+    argv = [str(DIVERGENT), "--backends", f"eager,{PERTURBS}", "--color", "never"]
+    plain = main(argv)
+    plain_out = capsys.readouterr().out
+    minimized = main([*argv, "--minimize"])
+    minimized_out = capsys.readouterr().out
+
+    assert plain == minimized == EXIT_FINDING
+    stage = "first diverges at compile_check_perturbs"
+    assert stage in plain_out
+    assert stage in minimized_out
+    assert "numerics  (1 fail)" in minimized_out
+
+
+def test_a_budget_that_expires_prints_the_partial_marker(capsys):
+    code = main(
+        [
+            str(DIVERGENT),
+            "--backends",
+            f"eager,{PERTURBS}",
+            "--minimize",
+            "--budget",
+            "0",
+            "--color",
+            "never",
+        ]
+    )
+    out = capsys.readouterr().out
+
+    assert code == EXIT_FINDING
+    assert "partial" in out
+    assert "--budget of 0s ran out" in out
+    assert "this result is partial" in " ".join(out.split())
+
+
+def test_the_three_artifacts_carry_the_minimization(tmp_path):
+    from compile_check.report.json import validate
+
+    code = main(
+        [
+            str(DIVERGENT),
+            "--backends",
+            f"eager,{PERTURBS}",
+            "--minimize",
+            "--json",
+            str(tmp_path / "out.json"),
+            "--md",
+            str(tmp_path / "draft.md"),
+            "--emit-test",
+            str(tmp_path / "test_case.py"),
+            "--color",
+            "never",
+        ]
+    )
+    assert code == EXIT_FINDING
+
+    document = json.loads((tmp_path / "out.json").read_text())
+    assert validate(document) == []
+    assert document["schema_version"] == 2
+    minimized = document["minimized"]
+    assert minimized["attempted"] is True
+    assert [stub["path"] for stub in minimized["stubs"]] == ["head", "tail"]
+    assert [kept["path"] for kept in minimized["kept"]] == ["middle"]
+    assert minimized["shrinks"] == [{"index": 0, "before": [8, 4], "after": [1, 4]}]
+    assert minimized["partial"] is False
+
+    draft = (tmp_path / "draft.md").read_text()
+    assert "## Minimized" in draft
+    assert "- `head` (Linear) replaced with `torch.nn.Identity()`" in draft
+    assert "- input leaf 0: `(8, 4)` -> `(1, 4)`" in draft
+    assert "--minimize" in draft
+
+    emitted = (tmp_path / "test_case.py").read_text()
+    assert "model.head = torch.nn.Identity()  # was Linear" in emitted
+    assert "leaves[0] = leaves[0][:1]" in emitted
+
+
+def test_the_emitted_minimized_test_runs_and_fails_on_the_divergence(tmp_path):
+    # EXECUTE-ARTIFACTS: the emitted file is run for real, because the whole
+    # claim of the minimized emitter is that a *smaller* case still reproduces.
+    # A string match on the stub lines would pass on a file that does not even
+    # import.
+    path = tmp_path / "test_minimized.py"
+    code = main(
+        [
+            str(DIVERGENT),
+            "--backends",
+            f"eager,{PERTURBS}",
+            "--minimize",
+            "--emit-test",
+            str(path),
+            "--color",
+            "never",
+        ]
+    )
+    assert code == EXIT_FINDING
+
+    completed = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", str(path)],
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 1, completed.stdout + completed.stderr
+    assert "1 failed" in completed.stdout, completed.stdout
+    assert "SyntaxError" not in completed.stdout
+    assert "AssertionError" in completed.stdout
+
+
+def test_the_emitted_minimized_test_for_the_alias_case_still_fails_on_195451(tmp_path):
+    # The other half of the same rule, on a real torch bug rather than on a
+    # backend of our own: the case is shrunk from a two-element input to a
+    # one-element one, and the emitted regression test must still be RED.
+    path = tmp_path / "test_alias_minimized.py"
+    code = main(
+        [
+            str(CASES / "alias_copyback.py"),
+            "--minimize",
+            "--emit-test",
+            str(path),
+            "--color",
+            "never",
+        ]
+    )
+    if code == EXIT_OK:  # pragma: no cover - a torch that has landed PR 195484
+        pytest.skip("this torch does not reproduce 195451, so there is nothing to minimize")
+    assert code == EXIT_FINDING
+    emitted = path.read_text()
+    assert "leaves[0] = leaves[0][:1]" in emitted
+
+    completed = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", str(path)],
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 1, completed.stdout + completed.stderr
+    assert "1 failed" in completed.stdout, completed.stdout

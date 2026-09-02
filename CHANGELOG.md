@@ -234,9 +234,51 @@ merge order.
   saying so on stderr as `--write-baseline` does, and a write that fails is exit
   2 after the report rather than instead of it. `discover.load_target` records
   where the target came from (`results.TargetSource`) so a report can quote it.
+- **M3-3**: the minimizer of PLAN.md "Minimizer, v1", behind `--minimize`.
+  `minimize.py` runs only after a fail-severity finding -- the same one the
+  regression-test emitter writes about -- and re-runs exactly two lanes per
+  candidate, the eager reference and the one that diverged, judging each by the
+  oracle that produced the finding and by the finding's identity (oracle, lane,
+  output index, field) rather than by its message, so a shrink that moves the
+  first differing element is not read as a different bug. A control re-run of
+  the unchanged target comes first and is outside the budget: a finding that
+  does not reproduce twice is reported as such instead of being shrunk.
+  `shrink_inputs` halves the leading dimension while the finding survives, down
+  to one and never below it, taking leaves that share a leading dimension
+  together first (a batch of activations and a batch of masks halve as one, and
+  halving either alone would only make the model raise) and then offering each
+  leaf a halving of its own. `stub_children` is the delta debugging: every child
+  is replaced with `torch.nn.Identity()` in turn, parents before their children
+  and a stubbed subtree never walked into, the replacement kept when the finding
+  survives and reverted with a reason when it does not -- either "a passthrough
+  does not fit there", naming the exception, or "it lives in here". The work
+  happens on a deep copy, so the target the report describes is never edited.
+  `handoff_note` writes PLAN.md's step 4 as a note and never runs it:
+  `TORCHDYNAMO_REPRO_AFTER=aot TORCHDYNAMO_REPRO_LEVEL=4` for a numerics
+  divergence, and for any other oracle the same two variables plus the reason
+  the accuracy minifier would not isolate it. `--budget SECONDS` now bounds the
+  minimizer (it cannot bound the run: a compile that has started cannot be
+  interrupted without killing the process), a ceiling of 100 candidates applies
+  when it is not given, and a pass that hits either is reported as **partial**
+  in all three formats rather than as a smallest case. The minimized record
+  reaches the terminal report as a `minimized` block, the JSON as a top-level
+  `minimized` object -- `schema_version` 2, `null` meaning "not run" as against
+  a record whose `changed` is false meaning "run, and nothing could be reduced"
+  -- the Markdown draft as a `## Minimized` section, and the emitted regression
+  test as the shrunk factory and the stub lines that open the test method.
+  `tests/fixtures/divergent_child.py`: a three-block model whose middle block is
+  the only one a registered perturbing backend keys on, so the delta-debugging
+  pass has a target that is a fixture rather than a bug in the installed wheel.
 
 ### Fixed
 
+- `report/repro.py`: the whole-file fallback hands its `from __future__`
+  imports out instead of leaving them in the middle of the block. They are
+  only legal directly under a module docstring, so every regression test
+  emitted for a target whose entry point is bound inside a block -- a `with
+  torch.random.fork_rng()`, which is how a seeded model is usually written --
+  was a file that did not parse. Found by running an emitted test rather than
+  by reading one (M3-3).
 - `BackendResult.second_call_exception`, so a lane that answers once and then
   raises is recorded rather than only logged (M1-1).
 - `BackendResult.input_meta_before` / `input_meta_after`: shape, stride,
