@@ -6,6 +6,7 @@ was imported, which is the only moment at which it can be set.
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
@@ -17,9 +18,11 @@ from compile_check.results import TRACEBACK_LINES, BackendResult, RunSet
 from compile_check.runner import (
     ABLATION_LADDER,
     CACHE_ENV_VAR,
+    FP64_BACKEND,
     RunnerError,
     available_backends,
     run_all,
+    run_fp64_reference,
 )
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -252,3 +255,49 @@ def test_an_unavailable_device_is_rejected_before_anything_runs():
     with pytest.raises(RunnerError) as excinfo:
         run_all(target, ["eager"], device="cuda")
     assert "no CUDA device" in str(excinfo.value)
+
+
+def test_the_fp64_reference_runs_beside_the_backends_and_widens_nothing_else():
+    # PLAN.md "The oracle blind spot": an extra eager run at float64 width.
+    # The model the backends ran is the caller's own object, so widening it in
+    # place would corrupt every later run of the same target.
+    target = load_target(str(FIXTURES / "mlp.py"))
+    runset = run_all(target, ["eager"], fp64=True)
+
+    assert runset.fp64 is not None
+    assert runset.fp64.backend == FP64_BACKEND
+    assert runset.fp64.ok, runset.fp64.exception
+    assert runset.fp64.outputs[0].dtype == torch.float64
+    assert runset.fp64.grad_ran is False
+    # Not a lane: it is absent from the backend list and from `others`.
+    assert FP64_BACKEND not in runset.results
+    assert runset.backends == ["eager"]
+    assert next(target.fn.parameters()).dtype == torch.float32
+    assert runset.results["eager"].outputs[0].dtype == torch.float32
+
+
+def test_no_fp64_reference_is_asked_for_unless_the_flag_is_set():
+    target = load_target(str(FIXTURES / "mlp.py"))
+    assert run_all(target, ["eager"]).fp64 is None
+
+
+def test_a_target_that_cannot_be_copied_leaves_the_fp64_reference_unset(caplog):
+    class Uncopyable(torch.nn.Module):
+        def __deepcopy__(self, memo):
+            raise RuntimeError("this module refuses to be copied")
+
+        def forward(self, x):
+            return x * 2
+
+    with caplog.at_level(logging.WARNING, logger="compile_check"):
+        assert run_fp64_reference(Uncopyable(), (torch.ones(3),)) is None
+    assert "no fp64 reference" in caplog.text
+
+
+def test_a_plain_callable_needs_no_copy_to_run_at_float64():
+    result = run_fp64_reference(torch.sin, (torch.ones(3),))
+
+    assert result is not None
+    assert result.ok, result.exception
+    assert result.outputs[0].dtype == torch.float64
+    torch.testing.assert_close(result.outputs[0], torch.sin(torch.ones(3, dtype=torch.float64)))

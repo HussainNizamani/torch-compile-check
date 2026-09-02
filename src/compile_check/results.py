@@ -151,6 +151,16 @@ class RunSet:
     """``env.collect_environment()``, taken after torch was imported and after
     the cache setting was applied, so it records the process that actually ran."""
 
+    fp64: BackendResult | None = None
+    """The ``eager_fp64`` reference run, when ``--fp64-oracle`` asked for one.
+
+    Kept off :attr:`results` on purpose. PLAN.md "The oracle blind spot" makes
+    this a reference the numerics oracle reads, not a lane under test: it must
+    never appear in :attr:`others`, in the backend table, or as the backend a
+    stage verdict names. ``None`` when the flag was off or the target could not
+    be run at float64.
+    """
+
     @property
     def backends(self) -> list[str]:
         """The backends that ran, in order."""

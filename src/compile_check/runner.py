@@ -37,10 +37,12 @@ from compile_check.results import TRACEBACK_LINES, BackendResult, CapturedExcept
 __all__ = [
     "ABLATION_LADDER",
     "CACHE_ENV_VAR",
+    "FP64_BACKEND",
     "RunnerError",
     "available_backends",
     "run_all",
     "run_backend",
+    "run_fp64_reference",
     "validate_backends",
     "validate_device",
 ]
@@ -60,6 +62,15 @@ ABLATION_LADDER: tuple[str, ...] = (
     "aot_eager_decomp_partition",
     "inductor",
 )
+
+# PLAN.md "The oracle blind spot": the optional fp64 eager reference. It is not
+# a torch.compile backend and never goes through the registry; the name exists
+# so a report can label the row, and so run_backend knows to call the target
+# directly the way it does for eager.
+FP64_BACKEND = "eager_fp64"
+
+# The lanes the runner calls directly instead of compiling.
+EAGER_BACKENDS: tuple[str, ...] = ("eager", FP64_BACKEND)
 
 
 class RunnerError(Exception):
@@ -136,6 +147,7 @@ def run_all(
     dynamic: bool = False,
     grad: bool = True,
     disable_caches: bool = True,
+    fp64: bool = False,
 ) -> RunSet:
     """Run ``target`` under every backend in ``backends`` and record the results.
 
@@ -150,6 +162,10 @@ def run_all(
         grad: run one backward pass when anything in the run requires grad.
         disable_caches: force the inductor caches off, which is the default and
             what the CLI does unless ``--allow-caches`` was passed.
+        fp64: add the ``eager_fp64`` reference run of ``--fp64-oracle``. It is
+            recorded on :attr:`~compile_check.results.RunSet.fp64`, not among
+            the backends, and a target that cannot be run at float64 leaves it
+            ``None`` rather than failing the run.
 
     Returns:
         One :class:`~compile_check.results.BackendResult` per backend, in the
@@ -183,6 +199,14 @@ def run_all(
         grad=grad,
         env=collect_environment(),
     )
+    if fp64:
+        runset.fp64 = run_fp64_reference(
+            fn,
+            target.example_inputs,
+            kwargs=target.kwargs,
+            device=device,
+            seed=seed,
+        )
     for backend in backends:
         log.debug("running backend %s", backend)
         runset.results[backend] = run_backend(
@@ -197,6 +221,87 @@ def run_all(
             grad=grad,
         )
     return runset
+
+
+def run_fp64_reference(
+    fn: Any,
+    example_inputs: Sequence[Any],
+    *,
+    kwargs: dict[str, Any] | None = None,
+    device: str = "cpu",
+    seed: int = 0,
+) -> BackendResult | None:
+    """Run the target once in float64 eager, as a reference for the numerics oracle.
+
+    PLAN.md "The oracle blind spot": eager is the reference world, so a bug that
+    lives in eager is invisible. The partial mitigation, borrowed from
+    ``benchmarks/dynamo/common.py``, is a third computation at float64 width;
+    comparing both the fp32 eager result and the compiled result against it
+    separates "compiled is wrong" from "both are imprecise".
+
+    The module is deep copied before it is widened, so the run under test keeps
+    the float32 weights every backend saw. A target that cannot be copied or
+    cannot run at float64 (a kernel with no double implementation is the usual
+    one) is not an error: the reference is simply unavailable, and the oracle
+    says nothing rather than something wrong.
+
+    Args:
+        fn: the target, already placed on ``device`` by :func:`run_all`.
+        example_inputs: the same inputs the backends were given.
+        kwargs: the target's keyword inputs.
+        device: where the reference run is placed.
+        seed: reapplied before the reference run, as for every other lane.
+
+    Returns:
+        A :class:`~compile_check.results.BackendResult` named
+        :data:`FP64_BACKEND`, or ``None`` when the target could not be widened.
+    """
+    torch = importlib.import_module("torch")
+    try:
+        widened = _to_float64(torch, fn)
+    except Exception as exc:
+        log.warning("no fp64 reference: the target could not be copied (%s)", exc)
+        return None
+
+    def widen(value: Any) -> Any:
+        if isinstance(value, torch.Tensor) and value.is_floating_point():
+            return value.detach().to(torch.float64)
+        return value
+
+    args, call_kwargs = torch.utils._pytree.tree_map(
+        widen, (tuple(example_inputs), dict(kwargs or {}))
+    )
+    # grad is off: the fp64 pass exists to give the numerics oracle a reference
+    # for the forward values, and PLAN.md's grad oracle compares eager against
+    # the compiled lanes, not against fp64.
+    result = run_backend(
+        widened,
+        args,
+        FP64_BACKEND,
+        kwargs=call_kwargs,
+        device=device,
+        seed=seed,
+        grad=False,
+    )
+    if not result.ok:
+        assert result.exception is not None
+        log.warning(
+            "the fp64 reference run raised %s: %s",
+            result.exception.type,
+            result.exception.message.splitlines()[0] if result.exception.message else "",
+        )
+    return result
+
+
+def _to_float64(torch: Any, fn: Any) -> Any:
+    """A float64 copy of the target, leaving the caller's own module alone.
+
+    A plain callable is returned as it is: it has no weights to widen, and the
+    inputs it is given are already float64.
+    """
+    if not isinstance(fn, torch.nn.Module):
+        return fn
+    return copy.deepcopy(fn).double()
 
 
 def run_backend(
@@ -216,6 +321,9 @@ def run_backend(
     Every input this backend sees is cloned from ``example_inputs`` here, not
     inherited from the previous backend, which is what makes a mutation by one
     backend invisible to the next.
+
+    ``backend`` is a torch.compile backend name, or one of
+    :data:`EAGER_BACKENDS`, which are called directly instead.
     """
     torch = importlib.import_module("torch")
     result = BackendResult(backend=backend)
@@ -234,7 +342,9 @@ def run_backend(
     _reset_compiler(torch)
     _zero_grads(torch, fn, leaves)
 
-    if backend == "eager":
+    # Neither of these two goes through torch.compile: eager is the reference
+    # world and eager_fp64 is the same call at another width.
+    if backend in EAGER_BACKENDS:
         call = fn
     else:
         call = torch.compile(
