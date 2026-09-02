@@ -482,12 +482,14 @@ def test_the_tool_reports_the_copyback_alias_case_end_to_end(capsys):
 
 
 def test_a_backend_that_really_raised_exits_one_whatever_fail_on_says(capsys):
-    # The live half of the rule the test above this one reaches by monkeypatch:
-    # a compiled lane that raises while eager does not is exit 1 regardless of
-    # --fail-on. The fixture registers a torch.compile backend that raises, so
-    # the failure is real and does not depend on an op that happens to be broken
-    # on some torch. Importing it here is what puts the name in the registry
-    # before the CLI validates --backends.
+    # The live half of the rule that
+    # test_a_compiled_lane_that_raised_exits_one_whatever_fail_on_says reaches by
+    # monkeypatching run_backend: a compiled lane that raises while eager does
+    # not is exit 1 regardless of --fail-on. The fixture registers a backend that
+    # raises when torch.compile asks it to compile, so the failure is real and
+    # does not depend on an op that happens to be broken on some torch.
+    # Importing it here is what puts the name in the registry before the CLI
+    # validates --backends.
     from compile_check.discover import import_target_module
 
     fixture = FIXTURES / "compile_only_raises.py"
