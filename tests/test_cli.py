@@ -1335,6 +1335,44 @@ def test_the_emitted_graph_break_test_actually_fails_on_the_break_it_was_written
     assert "1 failed" in completed.stdout, completed.stdout
 
 
+def test_the_emitted_test_for_a_dict_output_indexes_the_flattened_leaf(tmp_path):
+    # Defect 2 regression. A dict output does not support actual[N] by leaf
+    # position: tests/fixtures/dict_dtype_promotion.py's second flattened leaf
+    # (191308's int8-matmul dtype promotion, wrapped in a dict) diverges under
+    # inductor, and actual[1] on that dict is a lookup for the key 1 -- a
+    # KeyError, not the dtype assertion the finding is about. Run for real
+    # under pytest so the failure mode is the one that matters: AssertionError
+    # on the dtype, not a KeyError from indexing the emitted code wrong.
+    path = tmp_path / "test_dict_output.py"
+    code = main(
+        [
+            str(FIXTURES / "dict_dtype_promotion.py"),
+            "--backends",
+            "eager,inductor",
+            "--emit-test",
+            str(path),
+            "--color",
+            "never",
+        ]
+    )
+    assert code == EXIT_FINDING
+    assert path.exists()
+    emitted = path.read_text()
+    assert "tree_leaves(actual)[1]" in emitted
+    assert "actual[1]" not in emitted
+
+    completed = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", str(path)],
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 1, completed.stdout + completed.stderr
+    assert "1 failed" in completed.stdout, completed.stdout
+    assert "KeyError" not in completed.stdout
+    assert "AssertionError" in completed.stdout
+
+
 def test_emit_test_writes_nothing_on_a_clean_run_and_says_so(capsys, tmp_path):
     path = tmp_path / "test_case.py"
     code = main(
