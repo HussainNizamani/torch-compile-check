@@ -12,6 +12,7 @@ was imported, which is the only moment at which it can be set.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
 
@@ -734,6 +735,28 @@ def test_a_non_tensor_leaf_is_related_to_nothing():
         return x[:], "annotation"
 
     assert ALIAS.compare(*lanes(with_a_label, with_a_label, (torch.ones(4),)), CFG) == []
+
+
+def test_a_relation_where_everything_is_related_is_compared_in_under_a_second():
+    # The regression this pins (M2-2 housekeeping): every pair of 200 views of
+    # one buffer is a link, so the relation holds 20 100 of them, and answering
+    # 20 100 questions by scanning that tuple took 23.7 s on the development box
+    # against 0.3 s once both relations are indexed. The bound is deliberately
+    # loose -- what is being caught is a quadratic, not a slow machine.
+    views = 200
+
+    def many_views(x: torch.Tensor) -> tuple[torch.Tensor, ...]:
+        return tuple(x[index:] for index in range(views))
+
+    eager, other = lanes(many_views, many_views, (torch.ones(views + 1),))
+    assert len(relation(torch, eager).links) > views * views // 4
+
+    started = time.perf_counter()
+    findings = ALIAS.compare(eager, other, CFG)
+    elapsed = time.perf_counter() - started
+
+    assert findings == []
+    assert elapsed < 1.0, f"the alias comparison took {elapsed:.2f}s for {views} views"
 
 
 # --------------------------------------------------------------------------
