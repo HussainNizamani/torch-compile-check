@@ -234,7 +234,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_MAX_FINDINGS,
         help=(
             "how many findings to print per oracle (default: "
-            f"{DEFAULT_MAX_FINDINGS}); the rest are counted, never dropped"
+            f"{DEFAULT_MAX_FINDINGS}, 0 for counts only); the rest are counted, "
+            "never dropped"
         ),
     )
     parser.add_argument(
@@ -284,6 +285,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(f"{PROG}: {flag} ignored with --probe", file=sys.stderr)
         print(format_probe_table(probe_apis()))
         return EXIT_OK
+
+    if args.max_findings < 0:
+        # Not clamped silently: a negative cap is a typo, and a report that
+        # quietly showed everything would hide it.
+        return _tool_error(
+            f"--max-findings must not be negative, got {args.max_findings} "
+            "(0 prints the counts and none of the findings)"
+        )
 
     if args.path is None:
         print(

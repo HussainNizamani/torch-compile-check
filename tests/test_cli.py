@@ -643,7 +643,14 @@ def test_color_always_paints_and_never_does_not(capsys):
 
     assert "\033[" in painted
     assert "\033[" not in plain
-    assert re.sub(r"\033\[[0-9;]*m", "", painted) == plain
+
+    # Wall times are the one thing that legitimately differs between two runs
+    # of the same target, so they are normalised out; everything else, colour
+    # included, must be identical once the escapes are stripped.
+    def normalise(report):
+        return re.sub(r"\d+\.\d{4}s", "<time>", re.sub(r"\033\[[0-9;]*m", "", report))
+
+    assert normalise(painted) == normalise(plain)
 
 
 def test_color_auto_follows_the_terminal_and_no_color(monkeypatch):
@@ -714,3 +721,50 @@ def test_the_cache_variable_is_set_before_the_run_and_recorded_in_the_report(cap
     assert main([str(FIXTURES / "mlp.py"), "--backends", "eager", "--color", "never"]) == EXIT_OK
     assert os.environ[CACHE_ENV_VAR] == "1"
     assert "caches    disabled" in capsys.readouterr().out
+
+
+def test_a_negative_max_findings_is_a_tool_error(capsys):
+    code = main([str(FIXTURES / "mlp.py"), "--max-findings", "-1"])
+    err = capsys.readouterr().err
+
+    assert code == EXIT_ERROR
+    assert "--max-findings must not be negative, got -1" in err
+
+
+def test_max_findings_zero_counts_without_printing(capsys, monkeypatch):
+    from compile_check import oracles as oracles_module
+
+    class OneFailure:
+        name = "metadata"
+
+        def compare(self, eager, other, cfg):
+            del eager, cfg
+            return [
+                Finding(
+                    oracle="metadata",
+                    backend=other.backend,
+                    output_index=0,
+                    severity="fail",
+                    message="synthetic divergence",
+                    details={},
+                )
+            ]
+
+    monkeypatch.setitem(oracles_module.ORACLES, "metadata", OneFailure())
+    code = main(
+        [
+            str(FIXTURES / "mlp.py"),
+            "--backends",
+            "eager,aot_eager",
+            "--max-findings",
+            "0",
+            "--color",
+            "never",
+        ]
+    )
+    out = capsys.readouterr().out
+
+    assert code == EXIT_FINDING
+    assert "synthetic divergence" not in out
+    assert "metadata  (1 fail)" in out
+    assert "1 more metadata finding not shown (--max-findings 0)" in out
