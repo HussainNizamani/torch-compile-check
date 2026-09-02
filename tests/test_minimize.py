@@ -342,11 +342,45 @@ def test_a_stopped_budget_stays_stopped():
 
 
 def test_an_exhausted_budget_leaves_the_inputs_where_it_found_them():
-    args, _, shrinks, _ = shrink_inputs(
+    args, _, shrinks, notes = shrink_inputs(
         None, (torch.zeros(8, 2),), {}, always, budget=Budget(seconds=0)
     )
     assert args[0].shape == (8, 2)
     assert shrinks == []
+    # And says which of the two it was. The predicate here is `always`, so
+    # halving would have worked; the note used to claim the leading dimension
+    # was load-bearing, which the pass had not checked and could not (M3-3
+    # verifier).
+    assert notes == [
+        "the inputs were not shrunk: the --budget of 0s ran out after 0 candidate re-runs"
+    ]
+
+
+def test_an_exhausted_step_ceiling_is_reported_as_the_ceiling_and_not_as_a_measurement():
+    _, _, shrinks, notes = shrink_inputs(
+        None, (torch.zeros(8, 2),), {}, always, budget=Budget(steps=0)
+    )
+    assert shrinks == []
+    assert notes == [
+        "the inputs were not shrunk: the ceiling of 0 candidate re-runs was reached "
+        "(--budget SECONDS is the other way to bound this)"
+    ]
+
+
+def test_a_record_a_ceiling_stopped_does_not_call_the_case_irreducible():
+    # The same sentence one level up: `summary` is what the Action's job
+    # summary prints, so this is the line most readers see.
+    stopped = Minimization(
+        finding=finding(),
+        reproduced=True,
+        partial=True,
+        partial_reason="the --budget of 0s ran out after 0 candidate re-runs",
+    )
+    assert stopped.changed is False
+    assert stopped.summary == (
+        "nothing was reduced: the --budget of 0s ran out after 0 candidate re-runs"
+    )
+    assert "load-bearing" not in stopped.summary
 
 
 # --- the minifier handoff ---------------------------------------------------

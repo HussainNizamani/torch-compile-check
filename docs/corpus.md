@@ -53,8 +53,23 @@ $ python -m cases.summary
 
 (The real run links every issue number; trimmed here for width.) This is
 the same table CI appends to the job summary on every matrix cell — real,
-executed output, not a description of one. A single twin through the actual
-CLI, for comparison:
+executed output, not a description of one.
+
+Each script compiles, so the five of them cost about a minute. The verdicts
+are cached in a JSON file under the system temporary directory, and CI's
+job-summary step reuses what the `pytest` step in the same job already
+measured; when it does, the tally line says so. An entry is reused only when
+the torch build and hash, the Python version, the machine, the interpreter and
+the case file's own bytes are all unchanged, so a torch upgrade or an edited
+case is measured again rather than answered from the file. Point
+`COMPILE_CHECK_OBSERVATIONS` at another path to move it, or set it to an empty
+value to switch it off:
+
+```console
+$ COMPILE_CHECK_OBSERVATIONS= python -m cases.summary   # always re-run everything
+```
+
+A single twin through the actual CLI, for comparison:
 
 ```console
 $ compile-check cases/dtype_promotion.py

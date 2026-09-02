@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import math
 import os
 import sys
 from collections.abc import Callable, Mapping, Sequence
@@ -36,7 +37,7 @@ from compile_check import __version__
 from compile_check.discover import Target
 from compile_check.env import probe_apis
 from compile_check.localize import StageVerdict, localize
-from compile_check.minimize import Minimization, minimize
+from compile_check.minimize import MAX_STEPS, Minimization, minimize
 from compile_check.oracles import (
     DEFAULT_GRAD_TOL_FACTOR,
     ORACLE_NAMES,
@@ -385,6 +386,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"--grad-tol-factor must not be negative, got {args.grad_tol_factor:g} "
             "(1 compares gradients exactly as outputs are compared, 0 demands "
             "bit-for-bit equality)"
+        )
+
+    if args.budget is not None and (math.isnan(args.budget) or args.budget < 0):
+        # A negative ceiling is not a ceiling. Treating it as exhausted -- which
+        # is what the comparison in minimize.Budget.spend does with it -- turned
+        # a typo into a minimizer that quietly did nothing and a report that
+        # said the case would not shrink (M3-3 verifier). NaN is here for the
+        # same reason from the other side: every comparison against it is False,
+        # so it reads as no ceiling at all.
+        return _tool_error(
+            f"--budget must be a non-negative number of seconds, got {args.budget:g} "
+            f"(0 stops the minimizer before its first candidate; omit --budget to leave "
+            f"it bounded by the ceiling of {MAX_STEPS} candidate re-runs instead)"
         )
 
     if args.path is None:

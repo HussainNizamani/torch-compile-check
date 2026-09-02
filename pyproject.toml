@@ -12,17 +12,40 @@ build-backend = "hatchling.build"
 
 [project]
 name = "compile-check"
-version = "0.0.1.dev0"
+# Kept in step with compile_check.__version__; tests/test_cli.py fails if the
+# two drift apart. The tag, the PyPI upload, and the Marketplace listing are
+# the maintainer's own step and are written out in docs/release.md -- this
+# number moving is what makes them possible, not a claim that they happened.
+version = "0.1.0"
 description = "Differential testing for torch.compile: does compiling your model change its answers?"
 readme = "README.md"
 requires-python = ">=3.10"
+# PEP 639: an SPDX expression plus the file, rather than the deprecated
+# `{text = "MIT"}` table and a `License ::` classifier, which is why there is
+# no such classifier below. hatchling 1.32 writes it as
+# `License-Expression: MIT` in Metadata-Version 2.5, and `twine check` passes;
+# if an index or an older pip ever refuses that, M4-notes records
+# `license = {text = "MIT"}` with the classifier added back as the fallback.
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Hussain Nizamani" }]
-keywords = ["pytorch", "torch.compile", "inductor", "testing", "differential-testing"]
+keywords = [
+  "pytorch",
+  "torch.compile",
+  "inductor",
+  "testing",
+  "differential-testing",
+  "regression-testing",
+  "ci",
+]
 classifiers = [
-  "Development Status :: 2 - Pre-Alpha",
+  # 3 - Alpha and not 4 - Beta: five oracles, a corpus, and a validation set
+  # against real models, but 0.1.0 is the first release anyone outside this
+  # repository has run.
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
   "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
@@ -30,6 +53,7 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Software Development :: Quality Assurance",
   "Topic :: Software Development :: Testing",
   "Typing :: Typed",
 ]
@@ -50,6 +74,23 @@ dev = [
   # is present (PLAN.md "Runner semantics"), a path that is only exercised in
   # CI if numpy is installed there.
   "numpy",
+  # The release step of docs/release.md: `python -m build` then
+  # `twine check dist/*`. Both are dev tooling and neither is imported by the
+  # package, which is why they are here and not in a fourth extra.
+  "build>=1.2",
+  "twine>=6.1",
+]
+# What `validation/run.py` needs to build its targets, and nothing the tool
+# itself imports: PLAN.md "Engineering decisions" keeps torch the only runtime
+# dependency (docs/validation.md "Extras"). transformers is pinned below 5
+# because 5.x moved `from transformers import BertModel` behind a lazy import
+# that raises ModuleNotFoundError, which is what made hf_tiny_bert unrunnable
+# on the M4-2 estate run. torchvision has no pin here and a hard rule instead:
+# it must come from the same index as torch, or its compiled ops do not load
+# (docs/cross-arch.md).
+validation = [
+  "torchvision",
+  "transformers<5",
 ]
 
 [project.scripts]
@@ -58,6 +99,7 @@ compile-check = "compile_check.cli:main"
 [project.urls]
 Homepage = "https://github.com/HussainNizamani/compile-check"
 Source = "https://github.com/HussainNizamani/compile-check"
+Documentation = "https://github.com/HussainNizamani/compile-check/blob/main/docs/README.md"
 Issues = "https://github.com/HussainNizamani/compile-check/issues"
 Changelog = "https://github.com/HussainNizamani/compile-check/blob/main/CHANGELOG.md"
 
@@ -102,7 +144,7 @@ select = [
 # `from cases.markers import ...` as a third-party package and sorts the corpus
 # imports away from the ones beside them. tests/conftest.py is what puts the
 # root on sys.path.
-known-first-party = ["cases", "compile_check"]
+known-first-party = ["cases", "compile_check", "validation"]
 
 [tool.mypy]
 # PLAN.md "Engineering decisions": mypy strict over the package, not over tests

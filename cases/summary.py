@@ -14,9 +14,24 @@ anywhere else and silent when the variable is unset, and a redirect is the one
 line of workflow that makes both cases obvious.
 
 :func:`observe` is also what the two corpus test modules use, so "run the
-standalone script and read its verdict" is written once. It is cached per
-process: the scripts are slow (each compiles), and within one process the answer
-cannot change, since the torch under them cannot.
+standalone script and read its verdict" is written once. It is cached twice
+over, because the scripts are slow -- each one compiles -- and within one
+environment the answer cannot change.
+
+Per process, with ``functools.cache``: the torch under the scripts cannot move
+while the interpreter is running.
+
+Across processes, in a JSON file under the system temporary directory: CI runs
+the whole corpus through ``pytest`` and then runs it again in the job-summary
+step, which used to cost a second full set of compiles per matrix cell (M2-3
+note). An entry is reused only when the *fingerprint* matches -- torch version
+and build hash, Python version, machine, interpreter path -- and only when the
+script's own source is byte-for-byte what produced it, so a torch upgrade or an
+edited case re-runs rather than reports a stale verdict. Nothing depends on the
+file: it is written best-effort, every read failure falls back to running the
+script, and the table says how many rows came from it.
+``COMPILE_CHECK_OBSERVATIONS`` points the file somewhere else; set to an empty
+value it switches that half of the caching off entirely.
 
 Nothing here decides that a disagreement is a failure. PLAN.md "Regression
 corpus" makes the marker a recorded expectation and the script the measurement;
@@ -28,11 +43,16 @@ exit code is 0 unless this module could not run at all.
 from __future__ import annotations
 
 import functools
+import hashlib
+import json
+import os
 import platform
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 CASES_DIR = Path(__file__).resolve().parent
 
@@ -45,7 +65,14 @@ if __package__ in {None, ""}:  # pragma: no cover - only true under `python case
 
 from cases.markers import CASES, MARKERS, Verdict, expected_verdict  # noqa: E402
 
-__all__ = ["Observation", "main", "observe", "render_table"]
+__all__ = [
+    "CACHE_ENV_VAR",
+    "Observation",
+    "cache_file",
+    "main",
+    "observe",
+    "render_table",
+]
 
 # The exit codes the standalone scripts agree on (cases/README.md "Adding a
 # case"): 1 is RED, 0 is GREEN, and 2 is a crash, which establishes neither.
@@ -72,6 +99,127 @@ class Observation:
     """The script's own one-line verdict, which carries the torch build it
     measured and what it saw. Empty when it printed nothing."""
 
+    cached: bool = False
+    """Whether this came out of the cross-process cache rather than a run.
+
+    Reported rather than hidden: the table is a measurement, and "this row was
+    produced twenty minutes ago by the pytest step" is part of what it is.
+    """
+
+
+CACHE_ENV_VAR = "COMPILE_CHECK_OBSERVATIONS"
+"""Where to keep the cross-process observation cache. Empty value: nowhere."""
+
+
+# What the cached verdicts were measured under. An entry is reused only when
+# every part of this still matches, because every part of it can change what a
+# case does: the torch build most obviously, the interpreter because a second
+# virtual environment on the same machine has a different one, and the machine
+# because /tmp is shared on a build host.
+def _fingerprint() -> str:
+    import torch
+
+    return "|".join(
+        [
+            str(torch.__version__),
+            getattr(torch.version, "git_version", "") or "",
+            platform.python_version(),
+            platform.machine(),
+            sys.executable,
+        ]
+    )
+
+
+def cache_file() -> Path | None:
+    """The observation cache's path, or ``None`` when caching is switched off.
+
+    Keyed by the corpus directory, so two checkouts on one machine do not read
+    each other's verdicts, and under the system temporary directory rather than
+    in the repository, because it is a measurement of this machine and not
+    something to commit.
+    """
+    override = os.environ.get(CACHE_ENV_VAR)
+    if override is not None:
+        return Path(override) if override.strip() else None
+    digest = hashlib.sha256(str(CASES_DIR).encode("utf-8")).hexdigest()[:12]
+    return Path(tempfile.gettempdir()) / f"compile-check-observations-{digest}.json"
+
+
+def _read_cache() -> dict[str, Any]:
+    """Every cached observation that was measured under this fingerprint."""
+    path = cache_file()
+    if path is None:
+        return {}
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        # A cache is a speed-up. Anything unreadable -- absent, truncated by a
+        # killed run, written by another user -- means running the script.
+        return {}
+    if not isinstance(document, dict) or document.get("fingerprint") != _fingerprint():
+        return {}
+    entries = document.get("observations")
+    return entries if isinstance(entries, dict) else {}
+
+
+def _cached(case: str, source: str) -> Observation | None:
+    """One reusable observation, or ``None`` when there is nothing to reuse."""
+    entry = _read_cache().get(case)
+    if not isinstance(entry, dict) or entry.get("source") != source:
+        return None
+    verdict = entry.get("verdict")
+    if verdict not in ("RED", "GREEN", "UNKNOWN") or not isinstance(entry.get("exit_code"), int):
+        return None
+    return Observation(
+        case=case,
+        verdict=verdict,
+        exit_code=entry["exit_code"],
+        line=str(entry.get("line", "")),
+        cached=True,
+    )
+
+
+def _store(case: str, observation: Observation, source: str) -> None:
+    """Record one observation for the next process, best effort.
+
+    Read-modify-write rather than a whole-file rewrite from memory, because the
+    pytest run that fills this file and a ``python -m cases.summary`` beside it
+    are two processes with two different sets of cases in hand. The rename is
+    what makes a half-written file impossible for the reader.
+    """
+    path = cache_file()
+    if path is None:
+        return
+    document: dict[str, Any] = {"fingerprint": _fingerprint(), "observations": {}}
+    existing = _read_cache()
+    if existing:
+        document["observations"] = dict(existing)
+    document["observations"][case] = {
+        "verdict": observation.verdict,
+        "exit_code": observation.exit_code,
+        "line": observation.line,
+        "source": source,
+    }
+    temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    try:
+        temporary.write_text(json.dumps(document, indent=2, sort_keys=True), encoding="utf-8")
+        temporary.replace(path)
+    except OSError:
+        # Same rule as the read: never fail a run over the cache.
+        temporary.unlink(missing_ok=True)
+
+
+def _source_digest(script: Path) -> str | None:
+    """The script's content hash, or ``None`` when it cannot be read.
+
+    The observation is a measurement of *this* file; an edited case that reused
+    the verdict of the one before it would be the corpus lying about itself.
+    """
+    try:
+        return hashlib.sha256(script.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
 
 @functools.cache
 def observe(case: str, timeout: float = 900.0) -> Observation:
@@ -91,9 +239,17 @@ def observe(case: str, timeout: float = 900.0) -> Observation:
     Returns:
         The observation. Never raises for a case that failed: a script that
         crashed, timed out, or printed nothing is ``UNKNOWN`` with whatever it
-        did say.
+        did say. ``Observation.cached`` says whether it was measured now or
+        read back from the file another process left; see the module docstring
+        for when an entry is allowed to be reused.
     """
     script = CASES_DIR / f"{case}.py"
+    source = _source_digest(script)
+    if source is not None:
+        reused = _cached(case, source)
+        if reused is not None:
+            return reused
+
     try:
         completed = subprocess.run(
             [sys.executable, str(script)],
@@ -102,15 +258,20 @@ def observe(case: str, timeout: float = 900.0) -> Observation:
             timeout=timeout,
         )
     except subprocess.TimeoutExpired:
+        # Not cached, deliberately: a timeout says more about the machine that
+        # was busy than about the case, and a stored one would keep saying it.
         return Observation(
             case=case, verdict="UNKNOWN", exit_code=-1, line=f"timed out ({timeout}s)"
         )
-    return Observation(
+    observation = Observation(
         case=case,
         verdict=_EXIT_VERDICT.get(completed.returncode, "UNKNOWN"),
         exit_code=completed.returncode,
         line=_verdict_line(completed.stdout, completed.stderr),
     )
+    if source is not None:
+        _store(case, observation, source)
+    return observation
 
 
 def _verdict_line(stdout: str, stderr: str) -> str:
@@ -155,6 +316,16 @@ def render_table(observations: list[Observation], torch_version: str, git_versio
         "note, not a failure: it means the marker is out of date or this torch "
         "moved, and `cases/markers.py` is where it is recorded."
     )
+    reused = sum(1 for observation in observations if observation.cached)
+    if reused:
+        # Said out loud, because a reader is entitled to know which rows are a
+        # fresh measurement and which came from the pytest run that preceded
+        # this one. The fingerprint the cache is keyed by is in the heading
+        # above: same torch, same interpreter, same machine, same case source.
+        tally += (
+            f" {reused} of the {total} {'was' if reused == 1 else 'were'} reused from the "
+            f"observation cache ({cache_file()}) rather than re-run."
+        )
     return "\n".join([heading, "", *rows, "", tally])
 
 

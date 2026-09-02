@@ -40,7 +40,7 @@ length; the field names and shapes are exactly what shipped):
 ```json
 {
   "schema_version": 2,
-  "tool": {"name": "compile-check", "version": "0.0.1.dev0"},
+  "tool": {"name": "compile-check", "version": "0.1.0"},
   "target": {"name": "dtype_promotion:fn", "file": ".../cases/dtype_promotion.py", "entry": "fn", "inputs": "inputs"},
   "environment": {"torch_version": "2.14.0+cpu", "machine": "aarch64", "cuda_available": false, "...": "..."},
   "run": {"device": "cpu", "seed": 0, "backends": ["eager", "aot_eager", "inductor"], "...": "..."},
@@ -84,7 +84,7 @@ tool drafts; a person reads it, edits it, and files it. From the same run:
 ```markdown
 # [inductor] torch.compile changes the output dtype of cases/dtype_promotion.py
 
-> Drafted by [compile-check](https://github.com/HussainNizamani/compile-check) 0.0.1.dev0. The line above is the issue title; everything below is the body. Read it, check it, and edit it before filing -- the tool drafts, a person files.
+> Drafted by [compile-check](https://github.com/HussainNizamani/compile-check) 0.1.0. The line above is the issue title; everything below is the body. Read it, check it, and edit it before filing -- the tool drafts, a person files.
 
 `dtype_promotion:fn` was run under eager and `aot_eager`, `inductor` on the environment at the bottom of this report. The oracles reported 1 finding, all of them fail-severity. First diverges at inductor, which implicates inductor lowering/codegen.
 

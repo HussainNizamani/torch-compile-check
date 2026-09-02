@@ -1,7 +1,8 @@
 # Contributing
 
-Thanks for looking. The project is at M0, so the most useful contribution today
-is a review of [PLAN.md](PLAN.md) rather than code.
+Thanks for looking. The v1 surface of [PLAN.md](PLAN.md) is complete and the
+tree is at `0.1.0`; PLAN.md is still the scope lock, and its "v0.2 outlook" is
+where a change that does not fit a shipped milestone belongs.
 
 ## Setup
 
@@ -11,6 +12,16 @@ python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
 python -m pip install -e ".[dev]"
 pre-commit install
 ```
+
+Add `python -m pip install -e ".[validation]"` if you are touching
+`validation/`; it installs `torchvision` and `transformers<5`, which nothing
+the package itself imports needs. `torchvision` has to come from the same index
+as torch or its compiled ops will not load — see
+[docs/cross-arch.md](docs/cross-arch.md).
+
+Cutting a release is [docs/release.md](docs/release.md), and it is a
+maintainer's own set of commands rather than something a merged pull request
+sets off.
 
 ## Before you open a pull request
 

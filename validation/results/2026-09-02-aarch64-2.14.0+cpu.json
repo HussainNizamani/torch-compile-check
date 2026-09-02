@@ -14,7 +14,7 @@
       "exit_code": 0,
       "findings_by_oracle": {},
       "stage": "clean: no backend diverged from eager across 2 lanes",
-      "seconds": 24.66991664818488,
+      "seconds": 28.500912621151656,
       "reason": null
     },
     {
@@ -23,7 +23,7 @@
       "exit_code": 0,
       "findings_by_oracle": {},
       "stage": "clean: no backend diverged from eager across 2 lanes",
-      "seconds": 51.103752956027165,
+      "seconds": 61.20653134584427,
       "reason": null
     },
     {
@@ -32,7 +32,7 @@
       "exit_code": 0,
       "findings_by_oracle": {},
       "stage": "clean: no backend diverged from eager across 2 lanes",
-      "seconds": 64.4881445961073,
+      "seconds": 91.14283667318523,
       "reason": null
     },
     {
@@ -41,7 +41,7 @@
       "exit_code": 0,
       "findings_by_oracle": {},
       "stage": "clean: no backend diverged from eager across 2 lanes",
-      "seconds": 15.655135976150632,
+      "seconds": 18.880066756159067,
       "reason": null
     },
     {
@@ -50,7 +50,7 @@
       "exit_code": 0,
       "findings_by_oracle": {},
       "stage": "clean: no backend diverged from eager across 2 lanes",
-      "seconds": 17.925946686882526,
+      "seconds": 19.439105212222785,
       "reason": null
     },
     {
@@ -59,7 +59,7 @@
       "exit_code": 0,
       "findings_by_oracle": {},
       "stage": "clean: no backend diverged from eager across 2 lanes",
-      "seconds": 9.401456238003448,
+      "seconds": 10.659830579999834,
       "reason": null
     }
   ]

@@ -66,6 +66,14 @@ Briefly: `targets` is the only required input; everything else (`backends`,
 `allow-unimplemented`) has a default suited to a first run. Two outputs,
 `exit-code` and `json-path`.
 
+`minimize`, `cache` and `allow-unimplemented` take exactly the string `"true"`
+or the string `"false"` — an action input is always a string, so an unquoted
+YAML `true` works too, and anything that reaches the step as some other string
+(`"yes"`, `"1"`, `"on"`) is refused with an `::error::` line and exit 2 before
+any target runs, rather than read as false: a job that believed it was reusing
+its compile cache and was not is the kind of quiet wrongness this tool exists to
+complain about.
+
 Three of them decide what a run costs and what it means:
 
 - `cache` (default `false`) keeps torch's compile caches **off**, so the run
@@ -83,8 +91,15 @@ Three of them decide what a run costs and what it means:
 One table row per target — exit code, status, the graph oracle's break count,
 and the stage the divergence first appears at — plus a collapsed **Minimized**
 block per target when `minimize` is on, listing what the pass removed and what
-it had to keep. The renderer is [`summary.sh`](summary.sh) beside this file,
-kept out of `action.yml` so it can be run and tested outside a workflow.
+it had to keep. A target that could not run at all gets a row too, `2` and
+`tool error: <what the CLI said>`, and the loop moves on to the next target
+instead of cancelling it; the job still fails, because `exit-code` is the worst
+code across all of them.
+
+The step is [`run.sh`](run.sh) and the renderer is [`summary.sh`](summary.sh),
+both beside this file and both kept out of `action.yml` so they can be run and
+tested outside a workflow (`tests/test_action_run.py`,
+`tests/test_action_summary.py`).
 
 ## Installing from source: the `source` input
 

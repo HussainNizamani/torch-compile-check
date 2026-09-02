@@ -1317,9 +1317,28 @@ def test_a_lane_whose_graph_health_was_not_measured_is_left_out_of_a_baseline(tm
         ("not json at all", "is not valid JSON"),
         ("[1, 2]", "must be an object keyed by backend name"),
         ('{"inductor": 3}', "expected an object with graph_break_count"),
-        ('{"inductor": {"graph_break_count": -1}}', "expected a non-negative integer"),
-        ('{"inductor": {"graph_break_count": true}}', "expected a non-negative integer"),
-        ('{"inductor": {"break_reasons": [1]}}', "not a list of strings"),
+        (
+            '{"inductor": {"graph_break_count": -1, "break_reasons": []}}',
+            "expected a non-negative integer",
+        ),
+        (
+            '{"inductor": {"graph_break_count": true, "break_reasons": []}}',
+            "expected a non-negative integer",
+        ),
+        ('{"inductor": {"graph_break_count": 1, "break_reasons": [1]}}', "not a list of strings"),
+        # A key that is absent is not a key that is zero: defaulting it would
+        # make a truncated entry the strictest baseline there is, and every
+        # break the lane really has would come back as a new one (M3-1
+        # verifier). The field that is missing is in the message.
+        (
+            '{"inductor": {"break_reasons": ["gb0059: x"]}}',
+            "is missing 'graph_break_count' for backend 'inductor'",
+        ),
+        ('{"inductor": {"graph_break_count": 2}}', "is missing 'break_reasons' for backend"),
+        (
+            '{"inductor": {}}',
+            "is missing 'graph_break_count' and 'break_reasons' for backend 'inductor'",
+        ),
     ],
 )
 def test_a_baseline_that_is_not_this_shape_is_refused(tmp_path, content, expected):
