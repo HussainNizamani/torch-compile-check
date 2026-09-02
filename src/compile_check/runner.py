@@ -107,8 +107,23 @@ def available_backends() -> list[str]:
     return sorted({"eager", *dynamo.list_backends(exclude_tags=())})
 
 
-def validate_backends(backends: Sequence[str]) -> list[str]:
+def validate_backends(backends: Sequence[str], *, defer_unknown: bool = False) -> list[str]:
     """Check every requested backend name before anything is compiled.
+
+    Args:
+        backends: the requested names, in run order.
+        defer_unknown: report an empty request, but treat a name the registry
+            does not hold as a question for later rather than as an error. The
+            registry is not fixed at the moment the flags are parsed: a target
+            module is free to call ``torch._dynamo.register_backend`` when it is
+            imported, and a cold run that rejected the name before discovery
+            rejected a backend that was about to exist. The CLI passes this on
+            its up-front pass and lets :func:`run_all`, which runs after the
+            target has been imported and before anything is compiled, be the
+            check that refuses.
+
+    Returns:
+        The requested names, unchanged.
 
     Raises:
         RunnerError: naming the unknown backends and listing the known ones.
@@ -117,6 +132,16 @@ def validate_backends(backends: Sequence[str]) -> list[str]:
         raise RunnerError("no backends requested")
     known = available_backends()
     unknown = [name for name in backends if name not in known]
+    if unknown and defer_unknown:
+        log.debug(
+            "backend%s %s %s not registered yet; deferring the decision until the "
+            "target has been imported, which may register %s",
+            "s" if len(unknown) > 1 else "",
+            ", ".join(repr(name) for name in unknown),
+            "are" if len(unknown) > 1 else "is",
+            "them" if len(unknown) > 1 else "it",
+        )
+        return list(backends)
     if unknown:
         raise RunnerError(
             f"unknown backend{'s' if len(unknown) > 1 else ''} "
@@ -187,9 +212,11 @@ def run_all(
             registered on this torch or the device is unavailable.
     """
     torch = importlib.import_module("torch")
-    # Up front, before a single compile: a typo in --backends or a CUDA request
-    # on a CPU-only box is a setup error, and finding it after the eager lane
-    # has already run wastes the run and buries the message.
+    # Before a single compile, and after the target has been imported: a typo in
+    # --backends or a CUDA request on a CPU-only box is a setup error, and
+    # finding it after the eager lane has already run wastes the run and buries
+    # the message. This is the pass that refuses -- the CLI's earlier one defers
+    # unknown names, because importing the target is what registers them.
     validate_backends(backends)
     validate_device(device)
     _configure_caches(disable_caches)
