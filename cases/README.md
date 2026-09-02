@@ -24,6 +24,27 @@ Two shapes of file live here, and the difference is deliberate.
   runs the standalone script and its twin together on every test run and
   asserts they agree, so the two files cannot drift apart silently.
 
+Two modules here are not cases at all.
+
+- `markers.py` is the known-bad version table: per case, the torch versions and
+  build commits a RED was measured on, the fix PR and where it landed, and
+  `expected_verdict(case, torch_version, git_version)`, which answers `RED`,
+  `GREEN`, or `UNKNOWN`. It imports nothing from torch, so the arithmetic can be
+  tested against version strings rather than against whatever this machine has.
+- `summary.py` runs each standalone script in a subprocess and renders one
+  Markdown table of observed against expected. `python -m cases.summary` from
+  the repository root prints it; CI appends it to the job summary on every
+  matrix cell.
+
+Three test modules read all of this, and they ask three different questions.
+`tests/test_corpus_twins.py` asks whether the tool's exit code and stage line
+agree with the standalone script. `tests/test_corpus_oracles.py` asks whether
+the right *oracle* fired, by running each case's `build()` through the runner
+and grading the findings against the case's own `check()`.
+`tests/test_corpus_markers.py` asks whether the marker in `markers.py` is still
+current, and answers with a warning rather than a failure -- a nightly that
+fixes a bug upstream must not turn this repository red.
+
 ## Adding a case
 
 Write the standalone script first: reproduce the bug from the issue as
@@ -47,3 +68,11 @@ not deleted: its docstring records the version marker for RED and the test
 already handles the GREEN case, which is the point of anchoring the
 assertion to the standalone script's live verdict rather than a hardcoded
 exit code.
+
+Then add the case to the two other tables that describe it, which a test
+checks are all three in agreement: a `CaseMarker` in `markers.py` (issue,
+oracle, the versions RED was measured on, and the fix point if there is one --
+each field is a fact with a provenance, so do not write down an inference where
+the record wants a measurement), and a row in `tests/test_corpus_oracles.py`'s
+`CORPUS`, naming the adapter that hands your `check()` the arguments it reads
+and the set of oracles a RED reaches the report through.
