@@ -269,6 +269,11 @@ merge order.
   `tests/fixtures/divergent_child.py`: a three-block model whose middle block is
   the only one a registered perturbing backend keys on, so the delta-debugging
   pass has a target that is a fixture rather than a bug in the installed wheel.
+- **M4-1**: Action inputs `write-baseline`, `minimize`, `cache` (compile caches
+  on plus an `actions/cache` wheel cache) beside the existing `baseline` and
+  `budget`; a job summary carrying the graph-break count and a minimized block,
+  rendered by `action/summary.sh`; and self-test jobs for the baseline round
+  trip and for a seeded regression the action has to fail on.
 
 ### Fixed
 

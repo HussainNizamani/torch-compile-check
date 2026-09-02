@@ -71,7 +71,10 @@ fixed version:
 | `torch` | `stable` | `stable` (PyPI), `nightly` (CPU nightly index), or an explicit pip spec such as `torch==2.5.0`. |
 | `python-version` | `3.12` | Passed to `actions/setup-python`. |
 | `baseline` | *(unset)* | Path to a stored graph-health baseline JSON, forwarded as `--baseline`. When set, the graph oracle fails on **new** breaks only rather than every break — see "Baseline semantics" below. |
-| `budget` | *(unset)* | Wall-clock ceiling in seconds for the minimizer, forwarded to `--budget`. It bounds `--minimize` only; see [Runtime budget](#runtime-budget). |
+| `write-baseline` | *(unset)* | Path to write this run's graph health to, forwarded as `--write-baseline`. For the one-off job that produces the file you commit and then pass back as `baseline`; the run itself still reports its own verdict. Takes a single `targets` line — one baseline file is keyed by backend, not by target, so a second target would silently overwrite the first, and the action refuses instead. |
+| `minimize` | `false` | `"true"` passes `--minimize`, so a finding is shrunk — leading input dimension halved, child modules replaced with a passthrough — before it is reported. Costs one re-run of two lanes per candidate, which is what `budget` bounds. |
+| `budget` | *(unset)* | Wall-clock ceiling in seconds for the minimizer, forwarded to `--budget`. It bounds `minimize` only; see [Runtime budget](#runtime-budget). |
+| `cache` | `false` | `"true"` lets the run reuse compiled artifacts: torch's compile caches stay on (via the CLI's `--allow-caches`) and pip's wheel cache is restored and saved with `actions/cache`. The default is what makes a run measure the current compiler — see [Compile caches](#compile-caches). |
 | `json-out` | `compile-check-results.json` | Base path for the JSON results. With more than one target, each run writes its own file suffixed `.<n>.json` next to this base (`compile-check-results.1.json`, `.2.json`, ...), since one CLI invocation produces one JSON document per PLAN.md "Reports". |
 | `extra-args` | *(unset)* | Extra arguments appended verbatim to every invocation, for flags this action does not wrap directly (`--rtol`, `--seed`, `--fullgraph`, ...). |
 | `ref` | `main` | Git ref of `HussainNizamani/compile-check` to install from, until the package ships on PyPI. |
@@ -99,7 +102,22 @@ always fail regardless of any baseline — there is no such thing as an
 acceptable baseline of wrong answers.
 
 Produce the file with the CLI's `--write-baseline`, once per target, and
-commit what it writes:
+commit what it writes. In a workflow that is the `write-baseline` input — a
+one-off job (`workflow_dispatch` is the usual trigger) whose only purpose is to
+produce the file, which you then download and commit:
+
+```yaml
+- uses: HussainNizamani/compile-check/action@main
+  with:
+    targets: models/classifier.py
+    write-baseline: .compile-check/baseline.json
+- uses: actions/upload-artifact@v4
+  with:
+    name: baseline
+    path: .compile-check/baseline.json
+```
+
+By hand, the same thing:
 
 ```console
 $ compile-check models/classifier.py --write-baseline .compile-check/baseline.json
@@ -126,17 +144,36 @@ regenerate after an upgrade.
 The action disables `torch.compile`'s caches by default (the CLI sets
 `TORCHINDUCTOR_FORCE_DISABLE_CACHES=1`), matching the plain CLI, so a run
 measures the current compiler rather than a cached artifact left over from an
-earlier commit or an earlier job in the matrix. Pass `--allow-caches` through
-`extra-args` for teams who want the faster, cached run instead; the report
-records which mode was used.
+earlier commit or an earlier job in the matrix. That default is the point of
+the check: a cached run can report clean about code the current compiler never
+compiled.
+
+`cache: "true"` opts out, for teams who want the faster run. It does two
+things, and the report records the first of them in
+`environment.inductor_force_disable_caches` so a JSON artifact always says
+which mode produced it:
+
+- passes `--allow-caches`, so the CLI leaves `TORCHINDUCTOR_FORCE_DISABLE_CACHES`
+  alone and torch reuses whatever it cached earlier in the job;
+- restores and saves pip's download cache (`~/.cache/pip`) with
+  `actions/cache`, keyed on the runner OS and architecture, `python-version`,
+  and the `torch` input. That key is a spec, not a resolved version, so
+  `torch: nightly` — whose resolved version moves daily — keeps hitting the
+  same entry and simply downloads the wheel that is not in it; the prefix
+  restore key is what keeps a *changed* spec partly warm. It is the wheel
+  download this saves, minutes of it, not the compile.
+
+Nothing else changes: the same targets run, the same oracles compare, and the
+exit code means the same thing.
 
 ## Runtime budget
 
 Compilation is slow, and a matrix multiplies it. `budget` caps the wall-clock
 time the *minimizer* spends per target, and nothing else: it is passed to
-`--budget`, which bounds what `--minimize` starts. A pass that runs out reports
-a partial reduction rather than claiming a smallest case, and the run's verdict
-and exit code are unaffected.
+`--budget`, which bounds what `minimize: "true"` starts. A pass that runs out
+reports a partial reduction rather than claiming a smallest case — the job
+summary marks it **partial** — and the run's verdict and exit code are
+unaffected.
 
 It is deliberately not a ceiling on the run. A `torch.compile` call that has
 started cannot be interrupted without killing the process, so a flag that
@@ -144,9 +181,36 @@ claimed to bound the whole run would either be a lie or a `SIGKILL` with no
 report at all. Use the job's own `timeout-minutes` for that, and keep the
 target small.
 
-The action does not pass `--minimize` yet (that input lands with M4), so a
-workflow that sets `budget` today gets one line on stderr saying the ceiling had
-nothing to bound. Add `--minimize` through `extra-args` to turn it on.
+`budget` without `minimize: "true"` has nothing to bound, and the CLI says so
+in one line on stderr rather than pretending the ceiling is in force.
+
+## Job summary
+
+Every run writes a table to `$GITHUB_STEP_SUMMARY`, one row per target:
+
+| target | exit code | status | graph breaks | stage |
+|---|---|---|---|---|
+| `cases/dtype_promotion.py` | 1 | exit 1 | 0 | first diverges at inductor, which implicates inductor lowering/codegen |
+
+`graph breaks` is the graph oracle's break count for the run, read from the
+JSON report. It is one number when every compiled lane agrees, `aot_eager 2,
+inductor 5` when they do not, `n/a` for a lane whose graph health could not be
+measured, and `-` when no lane measured it at all. Breaks stay informational
+(PLAN.md "graph"), so this column is the only place a clean run mentions them —
+and it is the number that explains a missing speedup.
+
+With `minimize: "true"`, a `### Minimized` section follows the table, one
+collapsed block per target, listing the finding that was shrunk, the input
+dimensions that were halved, the child modules replaced with
+`torch.nn.Identity()`, the ones that had to be kept and why, and the cost in
+candidate re-runs. A pass stopped by `budget` is marked **partial** there,
+because a partial reduction that reads as a smallest case is worse than no
+reduction at all.
+
+The rendering lives in [`action/summary.sh`](../action/summary.sh) rather than
+inline in `action.yml`, so it can be run outside a workflow;
+`tests/test_action_summary.py` executes that file against reports the CLI
+writes during the test.
 
 ## Degrading honestly on a pre-M1-3 `ref`
 
@@ -169,7 +233,34 @@ nothing is worse than a red one that says so. A `ref` at or after M1-3
 
 `.github/workflows/action-selftest.yml` runs the action against this
 repository's own checkout on every push and pull request that touches
-`action/`. Its `selftest` job uses `source: auto`, which — running inside a
+`action/` or either of the two targets the jobs below run.
+
+Four jobs:
+
+- `selftest` — the action against `tests/fixtures/mlp.py`, plus the direct
+  `--version` / `--probe` / `--run-only` CLI smoke checks.
+- `selftest-baseline` — the baseline round trip, through the action rather
+  than through the CLI. One run writes a baseline from
+  `tests/fixtures/graph_break.py` (a target that breaks the graph twice on
+  purpose) with `cache: "true"`, and asserts both that the file records the
+  breaks and that `environment.inductor_force_disable_caches` came out
+  `false`, which is how the run says `cache` reached `--allow-caches`. A
+  second run is handed that file back through `baseline` and has to report
+  none of those breaks and force the caches off again. Asserting both halves
+  is the point: a round trip where the two runs behaved identically would have
+  proved nothing.
+- `selftest-seeded-regression` — PLAN.md's M4 definition of done, "fails
+  correctly on a seeded regression". `cases/dtype_promotion.py` (the 191308
+  int8 matmul promotion) runs through the action with `fail-on: metadata`,
+  `minimize: "true"` and a `budget`. The action is expected to fail, so the
+  step carries `continue-on-error` and the next step asserts that it did, then
+  reads the JSON for `exit_code: 1`, a `metadata` failure, and a `minimized`
+  object. A green job here without those would be the exact failure the job
+  exists to catch, and the assertion says so by name if the seed ever stops
+  reproducing on the installed torch.
+- `selftest-git-source` — below.
+
+Its `selftest` job uses `source: auto`, which — running inside a
 checkout of the action's own repository — always resolves to the
 checked-out-source install, never to `git+https://...`, the path an external
 consumer's workflow actually exercises. A second job,
