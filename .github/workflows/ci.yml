@@ -69,6 +69,25 @@ jobs:
       - name: Test
         run: pytest -q
 
+      # PLAN.md "Regression corpus": which of the known bugs *this* cell's torch
+      # still has is the question the matrix exists to answer, and the answer
+      # belongs on the job page rather than in a log. cases/summary.py runs each
+      # standalone RED/GREEN script and tabulates observed against the version
+      # marker in cases/markers.py; the same verdicts go through pytest above,
+      # where a disagreement is a warning rather than a failure.
+      #
+      # `if: always()` because the table is most wanted on the cell that just
+      # went red: a nightly that moves an oracle fails the tests and the corpus
+      # is how you tell "torch changed" from "the tool broke".
+      #
+      # Appended rather than written by the module: a module that wrote to
+      # $GITHUB_STEP_SUMMARY itself would be untestable anywhere else and silent
+      # when the variable is unset, and it costs five scripts' worth of compiles,
+      # so it is a step someone can see and time rather than a hidden side effect.
+      - name: Corpus RED/GREEN summary
+        if: always()
+        run: python -m cases.summary >> "$GITHUB_STEP_SUMMARY"
+
       # PLAN.md "Verified API surface": the private torch APIs the oracles lean
       # on are checked on every cell of the matrix, so a nightly that moves one
       # of them shows up here rather than in a user's run.
