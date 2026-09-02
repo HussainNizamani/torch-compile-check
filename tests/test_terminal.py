@@ -158,7 +158,8 @@ stage
   clean: no backend diverged from eager across 2 lanes
 
 next
-  run with --json to save the result, --md for an issue draft (both land in M3)"""
+  run with --json to save the result, --md for an issue draft, and --emit-test for a regression
+  test (the minimizer lands in M3-3)"""
 
 
 DIVERGENT_REPORT = f"""\
@@ -209,7 +210,8 @@ stage
   that is where the divergence becomes observable, not necessarily where the fix belongs
 
 next
-  run with --json to save the result, --md for an issue draft (both land in M3)"""
+  run with --json to save the result, --md for an issue draft, and --emit-test for a regression
+  test (the minimizer lands in M3-3)"""
 
 
 def test_a_clean_run_renders_exactly_this(runset):

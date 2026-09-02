@@ -48,6 +48,7 @@ PACKAGE_MODULES = [
     "compile_check.report.json",
     "compile_check.report.markdown",
     "compile_check.report.pytest_case",
+    "compile_check.report.repro",
     "compile_check.report.terminal",
     "compile_check.results",
     "compile_check.runner",
@@ -79,7 +80,7 @@ def test_probe_exits_zero_and_prints_one_row_per_api(capsys):
         assert line.split()[-1] in {"present", "absent"}
 
 
-@pytest.mark.parametrize("flag", ["--json", "--md", "--write-baseline"])
+@pytest.mark.parametrize("flag", ["--json", "--md", "--emit-test", "--write-baseline"])
 def test_probe_warns_that_report_flags_are_ignored(capsys, flag):
     assert main(["--probe", flag, "out"]) == EXIT_OK
     captured = capsys.readouterr()
@@ -130,6 +131,8 @@ def test_full_v1_flag_surface_parses():
             "out.json",
             "--md",
             "report.md",
+            "--emit-test",
+            "test_case.py",
             "--fail-on",
             "numerics,alias,metadata,grad,graph",
             "--fullgraph",
@@ -165,6 +168,7 @@ def test_full_v1_flag_surface_parses():
     assert args.device == "cuda"
     assert args.json == "out.json"
     assert args.md == "report.md"
+    assert args.emit_test == "test_case.py"
     assert args.fail_on == "numerics,alias,metadata,grad,graph"
     assert args.fullgraph is True
     assert args.dynamic is True
@@ -195,6 +199,9 @@ def test_defaults_match_the_plan():
     assert args.share_module is False
     assert args.baseline is None
     assert args.write_baseline is None
+    assert args.json is None
+    assert args.md is None
+    assert args.emit_test is None
     assert args.grad_tol_factor == pytest.approx(DEFAULT_GRAD_TOL_FACTOR)
     assert args.max_findings == DEFAULT_MAX_FINDINGS
     assert args.color == "auto"
@@ -214,21 +221,13 @@ def test_every_module_imports():
 def test_stubs_raise_not_implemented():
     # discover.py and runner.py landed in M1-1, the numerics and metadata
     # oracles in M1-2, localize.py plus report/terminal.py in M1-3, the alias
-    # oracle in M2-1, the grad oracle in M2-2 and the graph oracle in M3-1; each
-    # is covered by its own test module. What is left below is what M3 still
-    # owes: the minimizer and the three report formats.
+    # oracle in M2-1, the grad oracle in M2-2, the graph oracle in M3-1, and the
+    # three report formats in M3-2; each is covered by its own test module. What
+    # is left below is what M3-3 still owes: the minimizer.
     from compile_check import minimize
-    from compile_check.report import json as json_report
-    from compile_check.report import markdown, pytest_case
 
     with pytest.raises(NotImplementedError):
         minimize.minimize(None, None, lambda _fn, _inputs: True)
-    with pytest.raises(NotImplementedError):
-        json_report.dump({}, Path("out.json"))
-    with pytest.raises(NotImplementedError):
-        markdown.render({})
-    with pytest.raises(NotImplementedError):
-        pytest_case.emit({})
 
 
 def test_importing_the_package_does_not_import_torch():
@@ -803,6 +802,8 @@ def test_the_main_path_says_which_flags_it_ignored(capsys, tmp_path):
             str(FIXTURES / "mlp.py"),
             "--backends",
             "eager",
+            "--budget",
+            "60",
             "--json",
             str(tmp_path / "out.json"),
             "--md",
@@ -814,11 +815,14 @@ def test_the_main_path_says_which_flags_it_ignored(capsys, tmp_path):
     err = capsys.readouterr().err
 
     assert code == EXIT_OK
-    assert "--json is not implemented yet (it lands in M3), ignored" in err
-    assert "--md is not implemented yet (it lands in M3), ignored" in err
-    assert not (tmp_path / "out.json").exists()
-    # --baseline is no longer among them: it landed with the graph oracle.
-    assert "--baseline is not implemented yet" not in err
+    assert "--budget is not implemented yet (it lands in M3), ignored" in err
+    # --json and --md are no longer among them: they landed in M3-2, as
+    # --baseline did with the graph oracle in M3-1.
+    assert "--json is not implemented" not in err
+    assert "--md is not implemented" not in err
+    assert "--baseline is not implemented" not in err
+    assert (tmp_path / "out.json").exists()
+    assert (tmp_path / "report.md").exists()
 
 
 # --- the graph baseline, end to end ----------------------------------------
@@ -1246,3 +1250,107 @@ def test_run_only_records_the_grad_tolerance_factor(capsys):
         == EXIT_OK
     )
     assert "grad tol   x3 on the numerics tolerances (--grad-tol-factor)" in capsys.readouterr().out
+
+
+# --- the three report artifacts, end to end ---------------------------------
+
+
+def test_the_three_report_flags_write_their_files_on_a_red_case(capsys, tmp_path):
+    # The M3-2 brief's own command, on the 191308 corpus twin: one run, three
+    # artifacts, and the exit code the finding earns.
+    out = tmp_path / "reports"
+    code = main(
+        [
+            str(CASES / "dtype_promotion.py"),
+            "--backends",
+            "eager,inductor",
+            "--json",
+            str(out / "out.json"),
+            "--md",
+            str(out / "draft.md"),
+            "--emit-test",
+            str(out / "test_case.py"),
+            "--color",
+            "never",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    # RED on a torch that still promotes the dtype, GREEN on one that does not;
+    # the artifacts are written either way, which is what this pins.
+    assert code in {EXIT_OK, EXIT_FINDING}
+    document = json.loads((out / "out.json").read_text())
+    assert document["schema_version"] == 1
+    assert document["target"]["name"] == "dtype_promotion:fn"
+    assert document["exit_code"] == code
+    draft = (out / "draft.md").read_text()
+    assert draft.startswith("# ")
+    # PLAN.md "Cross-architecture parity is a feature": the architecture travels
+    # with every report, in every format.
+    assert "**architecture**" in draft
+    # The tool drafts and a person files, so the draft carries no disclosure
+    # line of its own: that is the filer's choice to make.
+    assert "AI assisted" not in draft
+    for path in ("out.json", "draft.md"):
+        assert f"wrote {out / path}" in captured.err
+
+    if code == EXIT_FINDING:
+        emitted = (out / "test_case.py").read_text()
+        assert "self.assertEqual(actual.dtype, expected.dtype)" in emitted
+        assert "https://github.com/pytorch/pytorch/issues/191308" in emitted
+        compile(emitted, str(out / "test_case.py"), "exec")
+
+
+def test_emit_test_writes_nothing_on_a_clean_run_and_says_so(capsys, tmp_path):
+    path = tmp_path / "test_case.py"
+    code = main(
+        [
+            str(FIXTURES / "mlp.py"),
+            "--backends",
+            "eager,aot_eager",
+            "--emit-test",
+            str(path),
+            "--color",
+            "never",
+        ]
+    )
+    err = capsys.readouterr().err
+
+    assert code == EXIT_OK
+    assert not path.exists()
+    assert "--emit-test wrote no file: this run has no fail-severity finding" in err
+
+
+def test_a_report_that_cannot_be_written_is_a_tool_error_after_the_report(capsys, tmp_path):
+    # The run itself succeeded, so its answer is printed; the failed write is
+    # still exit 2, because a CI job must not read a clean exit and no artifact.
+    blocked = tmp_path / "not-a-directory"
+    blocked.write_text("")
+    code = main(
+        [
+            str(FIXTURES / "mlp.py"),
+            "--backends",
+            "eager",
+            "--json",
+            str(blocked / "out.json"),
+            "--color",
+            "never",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert code == EXIT_ERROR
+    assert "cannot write --json" in captured.err
+    assert "clean: no backend diverged" in captured.out
+
+
+def test_the_json_written_by_a_real_run_validates_and_round_trips(tmp_path):
+    from compile_check.report.json import validate
+
+    path = tmp_path / "out.json"
+    assert main([str(FIXTURES / "mlp.py"), "--backends", "eager", "--json", str(path)]) == EXIT_OK
+
+    document = json.loads(path.read_text(encoding="utf-8"))
+    assert validate(document) == []
+    assert document["verdict"]["clean"] is True
+    assert document["environment"]["machine"] == os.uname().machine

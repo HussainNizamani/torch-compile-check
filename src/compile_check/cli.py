@@ -28,7 +28,8 @@ import argparse
 import logging
 import os
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 from compile_check import __version__
@@ -66,11 +67,18 @@ COLOR_CHOICES = ("auto", "always", "never")
 
 # Flags PLAN.md fixes in the v1 surface whose implementation lands later. Parsed
 # from M0 so the surface does not move, and reported as ignored rather than
-# silently accepted: a user who passed --json and got no file must be told why.
-_PENDING_FLAGS: tuple[tuple[str, str], ...] = (
+# silently accepted: a user who passed --budget and got no timeout must be told
+# why. --json and --md left this list in M3-2, when they started writing files.
+_PENDING_FLAGS: tuple[tuple[str, str], ...] = (("budget", "--budget"),)
+
+# The flags that write a file, for the paths that produce no run and so have
+# nothing to write. Named in one place so a new one cannot be forgotten in the
+# other.
+_OUTPUT_FLAGS: tuple[tuple[str, str], ...] = (
     ("json", "--json"),
     ("md", "--md"),
-    ("budget", "--budget"),
+    ("emit_test", "--emit-test"),
+    ("write_baseline", "--write-baseline"),
 )
 
 _EPILOG = """\
@@ -163,6 +171,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--md",
         metavar="REPORT.MD",
         help="write the Markdown issue draft",
+    )
+    # Not in PLAN.md's flag table, which fixes the semantic surface; the feature
+    # is PLAN.md "Regression test emission" and the M3-2 brief names the flag.
+    parser.add_argument(
+        "--emit-test",
+        metavar="TEST.PY",
+        help=(
+            "write the top finding as a regression test in the inductor suite's "
+            "eager-versus-compiled idiom; a clean run writes no file and says so"
+        ),
     )
     parser.add_argument(
         "--fail-on",
@@ -323,12 +341,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         # --probe is a diagnostic that prints a table and exits; it produces no
         # run, so it has nothing to write to the report files. Silently dropping
         # them looked like a failed write, so say so.
-        for flag, value in (
-            ("--json", args.json),
-            ("--md", args.md),
-            ("--write-baseline", args.write_baseline),
-        ):
-            if value is not None:
+        for attribute, flag in _OUTPUT_FLAGS:
+            if getattr(args, attribute) is not None:
                 print(f"{PROG}: {flag} ignored with --probe", file=sys.stderr)
         print(format_probe_table(probe_apis()))
         return EXIT_OK
@@ -386,6 +400,7 @@ def run(args: argparse.Namespace) -> int:
     cfg = _oracle_config(args, runset, baseline)
     findings = _compare_backends(runset, cfg)
     verdict = localize(runset, findings)
+    code = _exit_code(findings, verdict, fail_on)
     print(
         render(
             runset,
@@ -398,7 +413,109 @@ def run(args: argparse.Namespace) -> int:
             color=_use_color(args.color),
         )
     )
-    return _exit_code(findings, verdict, fail_on)
+    # After the report, deliberately: a run that finished has an answer, and a
+    # file that could not be written must not swallow it. The write failure is
+    # still exit 2 -- a CI job that reads the artifact must not see a clean exit
+    # and no artifact.
+    if not _write_reports(args, runset, findings, verdict, cfg, fail_on, code):
+        return EXIT_ERROR
+    return code
+
+
+def _write_reports(
+    args: argparse.Namespace,
+    runset: RunSet,
+    findings: Sequence[Finding],
+    verdict: StageVerdict,
+    cfg: OracleConfig,
+    fail_on: Sequence[str],
+    exit_code: int,
+) -> bool:
+    """Write whichever of ``--json``, ``--md`` and ``--emit-test`` were asked for.
+
+    Every write says so on stderr, as ``--write-baseline`` does, so that a report
+    piped to a file stays the report and a CI log still records what was
+    produced.
+
+    Returns:
+        Whether every requested file was written. A failure has already been
+        reported as a one-line tool error.
+    """
+    from compile_check.report import json as json_report
+    from compile_check.report import markdown, pytest_case
+
+    baseline = cfg.baseline.path if cfg.baseline is not None else None
+    written = True
+    if args.json is not None:
+        document = json_report.build(
+            runset,
+            findings,
+            verdict,
+            fail_on=fail_on,
+            grad_tol_factor=cfg.grad_tol_factor,
+            rtol=cfg.rtol,
+            atol=cfg.atol,
+            baseline=baseline,
+            fp64=cfg.fp64,
+            exit_code=exit_code,
+        )
+        written &= _write(args.json, "--json", lambda: json_report.dump(document, Path(args.json)))
+    if args.md is not None:
+        draft = markdown.render(
+            runset,
+            findings,
+            verdict,
+            fail_on=fail_on,
+            grad_tol_factor=cfg.grad_tol_factor,
+            baseline=baseline,
+            max_findings=args.max_findings,
+        )
+        written &= _write(args.md, "--md", lambda: _write_text(Path(args.md), draft))
+    if args.emit_test is not None:
+        case = pytest_case.emit(runset, findings, verdict)
+        if case is None:
+            # Not a failure, and not silent either: a user who asked for a test
+            # and got no file has to be told which of the two reasons it was.
+            print(
+                f"{PROG}: --emit-test wrote no file: {_nothing_to_emit(findings, verdict)}",
+                file=sys.stderr,
+            )
+        else:
+            written &= _write(
+                args.emit_test, "--emit-test", lambda: _write_text(Path(args.emit_test), case)
+            )
+    return written
+
+
+def _write(path: str, flag: str, write: Callable[[], None]) -> bool:
+    """Run one report writer, turning a failure into a one-line tool error."""
+    try:
+        write()
+    except (OSError, ValueError) as exc:
+        _tool_error(f"cannot write {flag} {path}: {exc}")
+        return False
+    print(f"{PROG}: wrote {path} ({flag})", file=sys.stderr)
+    return True
+
+
+def _write_text(path: Path, text: str) -> None:
+    """Write one text artifact, creating its directory as the baseline does."""
+    if path.parent and not path.parent.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _nothing_to_emit(findings: Sequence[Finding], verdict: StageVerdict) -> str:
+    """Why no regression test was written, in the words the user needs."""
+    from compile_check.report.pytest_case import select
+
+    raised = any(entry.raised is not None for entry in verdict.backends if entry.backend != "eager")
+    if select(findings) is None and not raised:
+        return (
+            "this run has no fail-severity finding and no compiled lane that raised, "
+            "so there is nothing for a regression test to assert"
+        )
+    return "the target's source was not available to inline"
 
 
 def _oracle_config(
