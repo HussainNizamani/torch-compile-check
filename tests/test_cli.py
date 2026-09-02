@@ -16,9 +16,13 @@ from compile_check.cli import (
     EXIT_OK,
     build_parser,
     format_probe_table,
+    format_run_only,
     main,
+    parse_fail_on,
 )
 from compile_check.env import PROBED_APIS
+from compile_check.oracles import Finding
+from compile_check.results import BackendResult, RunSet
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -243,6 +247,77 @@ def test_run_only_prints_a_row_and_the_outputs_per_backend(capsys):
     assert "4 parameters" in out
 
 
+def test_run_only_reports_the_oracles_and_finds_nothing_on_a_clean_model(capsys):
+    code = main([str(FIXTURES / "mlp.py"), "--run-only", "--backends", "eager,aot_eager"])
+    out = capsys.readouterr().out
+    assert code == EXIT_OK
+    # The two that run, and the two that were asked for and do not exist yet:
+    # "not checked" must not read as "checked and clean".
+    assert "oracles    numerics, metadata" in out
+    assert "not implemented yet, nothing checked: alias, grad" in out
+    assert "findings\n  none" in out
+
+
+def test_run_only_can_restrict_the_oracles_it_runs(capsys):
+    code = main(
+        [str(FIXTURES / "mlp.py"), "--run-only", "--backends", "eager", "--fail-on", "metadata"]
+    )
+    out = capsys.readouterr().out
+    assert code == EXIT_OK
+    assert "oracles    metadata\n" in out
+
+
+def test_run_only_rejects_an_unknown_fail_on_category(capsys):
+    code = main([str(FIXTURES / "mlp.py"), "--run-only", "--fail-on", "numerics,typo"])
+    err = capsys.readouterr().err
+    assert code == EXIT_ERROR
+    assert "Traceback" not in err
+    assert "unknown --fail-on category 'typo'" in err
+    assert "numerics, alias, metadata, grad, graph" in err
+
+
+def test_parse_fail_on_keeps_the_order_and_drops_duplicates():
+    assert parse_fail_on("metadata, numerics ,metadata") == ["metadata", "numerics"]
+    assert parse_fail_on(",") == []
+    with pytest.raises(ValueError, match="unknown --fail-on categories 'a', 'b'"):
+        parse_fail_on("a,b")
+
+
+def test_format_run_only_lists_the_findings_it_is_given():
+    runset = RunSet(
+        target_name="m:model",
+        device="cpu",
+        seed=0,
+        fullgraph=False,
+        dynamic=False,
+        grad=True,
+        results={"eager": BackendResult(backend="eager", outputs=[1])},
+    )
+    findings = [
+        Finding(
+            oracle="metadata",
+            backend="inductor",
+            output_index=0,
+            severity="fail",
+            message="dtype differs: eager torch.int8, inductor torch.int64",
+            details={"field": "dtype"},
+        ),
+        Finding(
+            oracle="numerics",
+            backend="inductor",
+            output_index=None,
+            severity="warn",
+            message="something structural",
+            details={},
+        ),
+    ]
+    out = format_run_only(runset, findings, fail_on=["numerics", "metadata"])
+
+    assert "[fail] metadata inductor[0] dtype differs" in out
+    assert "[warn] numerics inductor[-] something structural" in out
+    assert "  none" not in out
+
+
 def test_run_only_reports_a_raising_model_as_a_tool_error(capsys):
     code = main([str(FIXTURES / "raises.py"), "--run-only", "--backends", "eager"])
     out = capsys.readouterr().out
@@ -331,3 +406,10 @@ def test_a_model_that_raises_still_reports_per_backend(capsys):
     assert code == EXIT_ERROR
     assert "raised RuntimeError" in captured.out
     assert captured.err == ""
+
+
+def test_run_only_without_an_eager_lane_says_nothing_was_compared(capsys):
+    code = main([str(FIXTURES / "mlp.py"), "--run-only", "--backends", "aot_eager"])
+    out = capsys.readouterr().out
+    assert code == EXIT_OK
+    assert "findings\n  not checked: this run has no eager lane" in out
