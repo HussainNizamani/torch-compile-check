@@ -346,6 +346,21 @@ def test_a_lane_that_raised_with_no_finding_still_gets_a_test():
     assert 'actual = torch.compile(fn, backend="inductor")(*make_inputs())' in case
 
 
+def test_nothing_is_emitted_when_the_eager_reference_itself_raised():
+    # A compiled lane that also raised did not diverge from a working eager
+    # run -- there is no eager behaviour left to assert against, whatever the
+    # compiled lane did, so "raised where eager did not" would be false here.
+    runset = make_runset()
+    runset.results["eager"].exception = CapturedException(
+        type="RuntimeError", message="the model is broken", traceback=()
+    )
+    runset.results["inductor"].exception = CapturedException(
+        type="RuntimeError", message="backend compiler failed", traceback=()
+    )
+
+    assert emit(runset, [], localize(runset, [])) is None
+
+
 def test_a_clean_run_emits_nothing():
     runset = make_runset()
 

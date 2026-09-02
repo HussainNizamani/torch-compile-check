@@ -114,6 +114,16 @@ def title(runset: RunSet, findings: Sequence[Finding], verdict: StageVerdict) ->
     if top is not None:
         return f"[{top.backend}] torch.compile changes {_subject(top)} of {target}"
 
+    if verdict.eager_exception is not None:
+        # The reference itself raised (PLAN.md's MODEL stage): a compiled lane
+        # that also raised did not diverge from anything, so the title names
+        # what actually happened -- eager raising -- rather than naming a
+        # compiled lane as though torch.compile were the one that broke it.
+        return (
+            f"compile-check could not compare {target}: "
+            f"the eager reference raised {verdict.eager_exception.type}"
+        )
+
     raised = next(
         (
             entry

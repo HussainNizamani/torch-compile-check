@@ -1373,6 +1373,42 @@ def test_the_emitted_test_for_a_dict_output_indexes_the_flattened_leaf(tmp_path)
     assert "AssertionError" in completed.stdout
 
 
+def test_emit_test_writes_nothing_when_the_eager_reference_itself_raised(capsys, tmp_path):
+    # Defect 3 regression. tests/fixtures/raises.py raises under eager too, so
+    # a compiled lane raising alongside it is not a lane that diverged from a
+    # working eager run -- the model itself is broken (exit 2), and there is
+    # no eager behaviour left to assert against.
+    path = tmp_path / "test_raises.py"
+    code = main([str(FIXTURES / "raises.py"), "--emit-test", str(path), "--color", "never"])
+    err = capsys.readouterr().err
+
+    assert code == EXIT_ERROR
+    assert not path.exists()
+    assert (
+        "--emit-test wrote no file: the eager reference itself raised, "
+        "so there is no eager behaviour to assert" in err
+    )
+
+
+def test_md_says_the_eager_reference_raised_not_a_compiled_lane(capsys, tmp_path):
+    # Defect 3 regression, the Markdown half: before the fix, both the title
+    # and the "## Regression test" section named the compiled lane as though
+    # torch.compile broke it, although eager raised the same way -- a record
+    # of a tool error, not a bug report.
+    path = tmp_path / "draft.md"
+    code = main([str(FIXTURES / "raises.py"), "--md", str(path), "--color", "never"])
+    capsys.readouterr()
+
+    assert code == EXIT_ERROR
+    draft = path.read_text()
+
+    assert draft.startswith("# compile-check could not compare")
+    assert "the eager reference raised RuntimeError" in draft
+    assert "raised where eager did not" not in draft
+    assert "torch.compile raises" not in draft
+    assert "## Regression test" not in draft
+
+
 def test_emit_test_writes_nothing_on_a_clean_run_and_says_so(capsys, tmp_path):
     path = tmp_path / "test_case.py"
     code = main(

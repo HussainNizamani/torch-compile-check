@@ -243,6 +243,38 @@ def test_a_model_that_raised_in_eager_says_so(runset):
     assert "the model raised under eager, so nothing was compiled" in text
 
 
+def test_a_model_that_raised_in_eager_names_it_in_the_title_not_the_lane(runset):
+    # A compiled lane that also raised did not diverge from a working eager
+    # run, so the title must not name it the way test_a_lane_that_raised_is_
+    # named_in_the_title below names a real divergence.
+    runset.results["eager"].exception = CapturedException(
+        type="ValueError", message="the model is broken", traceback=()
+    )
+    runset.results["inductor"].exception = CapturedException(
+        type="RuntimeError", message="backend compiler failed", traceback=()
+    )
+    verdict = localize(runset, [])
+
+    assert title(runset, [], verdict) == (
+        "compile-check could not compare cases/dtype_promotion.py: "
+        "the eager reference raised ValueError"
+    )
+    assert "torch.compile raises" not in title(runset, [], verdict)
+
+
+def test_a_model_that_raised_in_eager_carries_no_regression_test_section(runset):
+    runset.results["eager"].exception = CapturedException(
+        type="ValueError", message="the model is broken", traceback=()
+    )
+    runset.results["inductor"].exception = CapturedException(
+        type="RuntimeError", message="backend compiler failed", traceback=()
+    )
+    text = draft(runset, findings=())
+
+    assert "## Regression test" not in text
+    assert "raised where eager did not" not in text
+
+
 def test_the_findings_are_capped_and_the_rest_counted(runset):
     findings = [FINDING] * 4
     text = draft(runset, findings=findings, max_findings=2)
