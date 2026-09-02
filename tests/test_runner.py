@@ -214,7 +214,8 @@ def test_the_layout_of_every_input_is_recorded_around_the_call():
 
     assert result.ok, result.exception
     before, after = result.input_meta_before[0], result.input_meta_after[0]
-    assert before is not None and after is not None
+    assert before is not None
+    assert after is not None
     assert before.shape == (3, 4)
     assert before.stride == (4, 1)
     assert before.dtype == "torch.float32"
@@ -240,7 +241,8 @@ def test_an_in_place_resize_shows_up_in_the_layout_records():
 
     assert result.ok, result.exception
     before, after = result.input_meta_before[0], result.input_meta_after[0]
-    assert before is not None and after is not None
+    assert before is not None
+    assert after is not None
     assert (before.shape, before.stride) == ((3, 4), (4, 1))
     assert (after.shape, after.stride) == ((2, 6), (6, 1))
 
