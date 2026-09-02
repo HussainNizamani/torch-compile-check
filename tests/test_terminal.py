@@ -333,3 +333,13 @@ def test_allowed_caches_are_shouted_about(runset):
     report = render(runset, [], localize(runset, []))
 
     assert "ENABLED (force_disable_caches=False, --allow-caches)" in report
+
+
+def test_a_negative_cap_never_reports_more_hidden_than_exist(runset, findings):
+    # A caller that clamps nothing must still get an honest count: the CLI
+    # rejects a negative --max-findings, and the renderer does not trust it to.
+    report = render(runset, findings, localize(runset, findings), max_findings=-5)
+
+    assert "[fail]" not in report
+    assert "2 more metadata findings not shown" in report
+    assert "1 more numerics finding not shown" in report

@@ -340,9 +340,13 @@ def _findings(
         if lines:
             lines.append("")
         lines.append(paint(f"{oracle}  ({counts})", "bold"))
-        for finding in group[:max_findings]:
+        # Clamped, and the hidden count derived from what was actually printed:
+        # a negative cap would otherwise slice from the end of the group and
+        # report more findings hidden than the group contains.
+        shown = group[: max(0, max_findings)]
+        for finding in shown:
             lines.extend(_finding_lines(finding, paint))
-        hidden = len(group) - max_findings
+        hidden = len(group) - len(shown)
         if hidden > 0:
             lines.append(
                 paint(
