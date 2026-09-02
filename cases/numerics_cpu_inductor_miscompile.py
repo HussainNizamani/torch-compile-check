@@ -97,9 +97,7 @@ def check(eager_out, compiled_outs, inputs):
     one run).
     """
     mismatches = [i for i, out in enumerate(compiled_outs) if not torch.equal(out, eager_out)]
-    nondeterministic = any(
-        not torch.equal(compiled_outs[0], out) for out in compiled_outs[1:]
-    )
+    nondeterministic = any(not torch.equal(compiled_outs[0], out) for out in compiled_outs[1:])
 
     if mismatches:
         return True, (
@@ -113,7 +111,10 @@ def check(eager_out, compiled_outs, inputs):
             f"compiled output matched eager on run 0 but was nondeterministic "
             f"across {len(compiled_outs)} repeated calls with identical inputs"
         )
-    return False, f"compiled output matched eager and was deterministic across {len(compiled_outs)} runs"
+    return (
+        False,
+        f"compiled output matched eager and was deterministic across {len(compiled_outs)} runs",
+    )
 
 
 def _report(case, backend_name, eager_out, compiled_outs):
@@ -130,7 +131,11 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--backend", default=None, help="extra backend to also check, e.g. aot_eager")
+    parser.add_argument(
+        "--backend",
+        default=None,
+        help="extra backend to also check, e.g. aot_eager",
+    )
     args = parser.parse_args()
 
     case = "numerics_cpu_inductor_miscompile"
@@ -140,7 +145,7 @@ def main():
         eager_out = fn(*example_inputs)
         compiled_fn = torch.compile(fn, backend="inductor", dynamic=True)
         compiled_outs = [compiled_fn(*example_inputs) for _ in range(4)]
-    except Exception as exc:  # noqa: BLE001 - a crash in the case itself, not a RED finding
+    except Exception as exc:
         print(f"CRASH {case} :: {type(exc).__name__}: {exc}")
         sys.exit(2)
 

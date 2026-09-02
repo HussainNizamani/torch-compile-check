@@ -86,6 +86,7 @@ select = [
 "src/compile_check/cli.py" = ["T20"]
 "src/compile_check/report/*.py" = ["T20"]
 "tests/*.py" = ["T20"]
+"cases/*.py" = ["T20"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["compile_check"]

@@ -81,7 +81,11 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--backend", default=None, help="extra backend to also check, e.g. aot_eager")
+    parser.add_argument(
+        "--backend",
+        default=None,
+        help="extra backend to also check, e.g. aot_eager",
+    )
     args = parser.parse_args()
 
     case = "dtype_int8_matmul_promotion"
@@ -89,8 +93,10 @@ def main():
 
     try:
         eager_out = fn(*example_inputs)
-        compiled_out = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=False)(*example_inputs)
-    except Exception as exc:  # noqa: BLE001 - a crash in the case itself, not a RED finding
+        compiled_out = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=False)(
+            *example_inputs
+        )
+    except Exception as exc:
         print(f"CRASH {case} :: {type(exc).__name__}: {exc}")
         sys.exit(2)
 
@@ -98,7 +104,9 @@ def main():
     exit_code = 1 if is_red else 0
 
     if args.backend:
-        extra_out = torch.compile(fn, backend=args.backend, fullgraph=True, dynamic=False)(*example_inputs)
+        extra_out = torch.compile(fn, backend=args.backend, fullgraph=True, dynamic=False)(
+            *example_inputs
+        )
         _report(case, args.backend, eager_out, extra_out)
 
     sys.exit(exit_code)

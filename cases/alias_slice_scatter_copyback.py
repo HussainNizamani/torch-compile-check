@@ -110,7 +110,10 @@ def check(eager_out, compiled_out, inputs):
         return False, "eager itself aliases input and output; case assumption violated"
 
     if not compiled_aliases:
-        return False, "compiled output does not alias input; matches eager (no bug on this backend/version)"
+        return (
+            False,
+            "compiled output does not alias input; matches eager (no bug on this backend/version)",
+        )
 
     # Confirm the alias is load-bearing: mutate the returned tensor and check
     # that the "input" (already consumed) tensor moved too.
@@ -125,7 +128,10 @@ def check(eager_out, compiled_out, inputs):
             f"output corrupted the input: before={before.tolist()} "
             f"after={after.tolist()}"
         )
-    return True, "compiled output aliases input (data_ptr equal) but mutate-probe did not corrupt it"
+    return (
+        True,
+        "compiled output aliases input (data_ptr equal) but mutate-probe did not corrupt it",
+    )
 
 
 def _run_variant(backend_name):
@@ -154,14 +160,18 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--backend", default=None, help="extra backend to also check, e.g. aot_eager")
+    parser.add_argument(
+        "--backend",
+        default=None,
+        help="extra backend to also check, e.g. aot_eager",
+    )
     args = parser.parse_args()
 
     case = "alias_slice_scatter_copyback"
     try:
         eager_result = _run_variant("eager")
         inductor_result = _run_variant("inductor")
-    except Exception as exc:  # noqa: BLE001 - a crash in the case itself, not a RED finding
+    except Exception as exc:
         print(f"CRASH {case} :: {type(exc).__name__}: {exc}")
         sys.exit(2)
 
