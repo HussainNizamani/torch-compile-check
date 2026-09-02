@@ -594,3 +594,33 @@ def test_a_long_handoff_note_wraps_under_its_label_and_keeps_the_variables(runse
     # The two variables must survive the wrap unbroken: a reader pastes them.
     assert "TORCHDYNAMO_REPRO_AFTER=aot" in " ".join(report.split())
     assert "TORCHDYNAMO_REPRO_LEVEL=4" in " ".join(report.split())
+
+
+def test_a_long_kept_line_wraps_without_breaking_the_module_path(runset):
+    # Measured on resnet18: `kept layer2.0.downsample.0 (Conv2d): replacing it
+    # raised RuntimeError, ...` runs past the width, and a wrap that split the
+    # dotted path would name a submodule that does not exist.
+    report = block(
+        render(
+            runset,
+            [],
+            localize(runset, []),
+            minimized=Minimization(
+                finding=MINIMIZED.finding,
+                reproduced=True,
+                kept=(
+                    Kept(
+                        path="layer2.0.downsample.0",
+                        module="Conv2d",
+                        reason="replacing it raised RuntimeError, so a passthrough "
+                        "does not fit there",
+                    ),
+                ),
+                handoff="handed off",
+            ),
+        ),
+        "minimized",
+    )
+    assert max(len(line) for line in report.splitlines()) <= 98
+    assert "layer2.0.downsample.0" in report
+    assert "layer2.0.downsample." not in report.replace("layer2.0.downsample.0", "")

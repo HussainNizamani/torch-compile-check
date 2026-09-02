@@ -573,7 +573,10 @@ def _minimized(minimized: Minimization | None, paint: Paint) -> str:
     if inputs:
         rows.append(("inputs", inputs))
     if model:
-        rows.append(("model", model))
+        # Wrapped, because a "kept" line carries a sentence: a real model's
+        # `kept layer2.0.downsample.0 (Conv2d): replacing it raised ...` runs
+        # past the width, and _wrap never breaks the dotted path itself.
+        rows.append(("model", _prose(model)))
     if minimized.notes:
         rows.append(("notes", _prose(minimized.notes)))
     if minimized.partial and minimized.partial_reason is not None:
