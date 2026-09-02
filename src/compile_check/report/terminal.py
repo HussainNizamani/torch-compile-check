@@ -28,7 +28,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any
 
 from compile_check import __version__
-from compile_check.localize import MODEL, NO_REFERENCE, StageVerdict
+from compile_check.localize import GRAPH_ORACLE, MODEL, NO_REFERENCE, StageVerdict
 from compile_check.oracles import (
     DEFAULT_GRAD_TOL_FACTOR,
     ORACLE_NAMES,
@@ -103,6 +103,7 @@ def render(
     *,
     fail_on: Sequence[str] = (),
     grad_tol_factor: float = DEFAULT_GRAD_TOL_FACTOR,
+    baseline: str | None = None,
     max_findings: int = DEFAULT_MAX_FINDINGS,
     color: bool = False,
 ) -> str:
@@ -123,6 +124,10 @@ def render(
             recorded because a clean grad row means a different thing at 10x
             than at 1x, and a report that did not say which one produced it
             would not be evidence.
+        baseline: the ``--baseline`` path, when one was in force. For the same
+            reason as ``grad_tol_factor``: a clean graph row against a baseline
+            says "no *new* breaks", which is a weaker statement than "no
+            breaks", and the two must not read alike.
         max_findings: how many findings to print per oracle group. The rest are
             counted, never silently dropped.
         color: emit ANSI colour. ``cli.py`` decides this from ``--color`` and
@@ -134,7 +139,7 @@ def render(
     paint = _painter(color)
     blocks = [
         _header(runset, paint),
-        _environment(runset, grad_tol_factor, paint),
+        _environment(runset, grad_tol_factor, baseline, paint),
         _backends(runset, paint),
         _checks(runset, findings, fail_on, paint),
         _findings(findings, max_findings, verdict.compared, paint),
@@ -161,7 +166,12 @@ def _header(runset: RunSet, paint: Paint) -> str:
     return f"{paint('compile-check', 'bold')} {__version__}   target {runset.target_name}"
 
 
-def _environment(runset: RunSet, grad_tol_factor: float, paint: Paint) -> str:
+def _environment(
+    runset: RunSet,
+    grad_tol_factor: float,
+    baseline: str | None,
+    paint: Paint,
+) -> str:
     """The environment block that travels with every report.
 
     PLAN.md "Cross-architecture parity is a feature": the architecture is always
@@ -203,12 +213,7 @@ def _environment(runset: RunSet, grad_tol_factor: float, paint: Paint) -> str:
         # non-default one: a lane that shares the module can diverge by itself,
         # because a buffer the forward pass writes leaks into the next lane, so
         # a report that did not say which mode produced it is not evidence.
-        (
-            "module",
-            "shared across every lane (--share-module)"
-            if runset.share_module
-            else "deep copied per lane",
-        ),
+        ("module", _module_line(runset)),
         # The tolerance the gradients were compared under, always printed and
         # not only when it is non-default: a clean grad row at 10x says
         # something weaker than a clean grad row at 1x, and a reader cannot tell
@@ -216,7 +221,34 @@ def _environment(runset: RunSet, grad_tol_factor: float, paint: Paint) -> str:
         ("gradients", _grad_line(runset.grad, grad_tol_factor)),
         ("caches", cache_line),
     ]
+    if baseline is not None:
+        # Only when there is one. Unlike the two rows above, the absence of a
+        # baseline is the default and says nothing a reader needs; its presence
+        # changes what a clean graph row means.
+        rows.append(("baseline", f"{baseline}   (the graph oracle reports new breaks only)"))
     return _section("environment", [f"{name:<10}{value}" for name, value in rows], paint)
+
+
+def _module_line(runset: RunSet) -> str:
+    """What actually happened to the module, not what the flags asked for.
+
+    Three states, and the M3 brief's point is that the third one used to be
+    invisible. ``--share-module`` is a choice; a module that refused
+    ``copy.deepcopy`` gets the same sharing without having chosen it, and until
+    M3-1 that showed here as "deep copied per lane" with the reason only in a
+    warning log. A run whose lanes may have leaked state into each other has to
+    say so where the evidence is read.
+
+    A target that is not an ``nn.Module`` gets neither sentence: a function has
+    no parameters or buffers, so there was never a copy to make or to skip.
+    """
+    if not runset.target_is_module:
+        return "not copied: the target is a plain callable, with no state to isolate"
+    if runset.share_module:
+        return "shared across every lane (--share-module)"
+    if runset.module_copy_error is not None:
+        return f"shared across every lane (deep copy failed: {runset.module_copy_error})"
+    return "deep copied per lane"
 
 
 def _grad_line(grad: bool, factor: float) -> str:
@@ -273,9 +305,16 @@ def _checks(
 
     Columns are the lanes compared against eager, because eager is the reference
     world and comparing it with itself answers nothing. Rows are all five
-    oracles of PLAN.md "Oracles", including the three that land in M2 and M3: an
+    oracles of PLAN.md "Oracles", whether or not this build implements them: an
     oracle that has not been written must not read as an oracle that found
     nothing.
+
+    The graph row plays by its own rules, because it asks a different question.
+    The other four compare two lanes, so a lane that raised leaves them nothing
+    to say and their cell is a dash. Graph health is measured from the lane
+    alone, and under ``--fullgraph`` the lane raising *is* the graph finding, so
+    the dash there means "no graph health was recorded" -- an uncompiled lane,
+    or one whose ``explain`` pass could not run at all.
     """
     lanes = [result.backend for result in runset.others]
     if not lanes:
@@ -288,6 +327,11 @@ def _checks(
     counted = _count(findings)
     raised = {name for name, result in runset.results.items() if not result.ok}
     reference_raised = runset.eager is None or not runset.eager.ok
+    unmeasured = {
+        result.backend
+        for result in runset.others
+        if result.graph_health is None or not result.graph_health.measured
+    }
 
     name_width = max(len(name) for name in ORACLE_NAMES)
     lane_widths = [max(len(lane), 16) for lane in lanes]
@@ -298,7 +342,15 @@ def _checks(
     for oracle in ORACLE_NAMES:
         marker = "yes" if oracle in fail_on else "no "
         cells = [
-            _cell(counted, oracle, lane, lane in raised or reference_raised, paint)
+            _cell(
+                counted,
+                oracle,
+                lane,
+                lane in unmeasured
+                if oracle == GRAPH_ORACLE
+                else lane in raised or reference_raised,
+                paint,
+            )
             for lane in lanes
         ]
         padded = "  ".join(
@@ -306,9 +358,15 @@ def _checks(
         )
         lines.append(f"{oracle:<{name_width}}  {marker:<7}  {padded}".rstrip())
 
-    legend = ["", paint("pass = no finding   not yet = the oracle lands in M3", "dim")]
+    pending = [name for name in ORACLE_NAMES if name not in ORACLES]
+    head = "pass = no finding"
+    if pending:
+        head += "   not yet = the oracle is not implemented in this build"
+    legend = ["", paint(head, "dim")]
     if raised or reference_raised:
         legend.append(paint("-    = the lane raised, so there was nothing to compare", "dim"))
+    if unmeasured:
+        legend.append(paint("-    = no graph health was recorded for that lane", "dim"))
     return _section("checks", lines + legend, paint)
 
 
@@ -316,13 +374,13 @@ def _cell(
     counted: Mapping[tuple[str, str], dict[str, int]],
     oracle: str,
     lane: str,
-    lane_raised: bool,
+    nothing_to_report: bool,
     paint: Paint,
 ) -> str:
     """One cell of the checks table."""
     if oracle not in ORACLES:
         return paint("not yet", "dim")
-    if lane_raised:
+    if nothing_to_report:
         return "-"
     counts = counted.get((oracle, lane))
     if not counts:
@@ -451,7 +509,22 @@ def _stage(verdict: StageVerdict, paint: Paint) -> str:
         lines += textwrap.wrap(
             f"{entry.backend} answered once and raised "
             f"{entry.raised_on_repeat.type} on the repeat call. That is graph health, "
-            "which the graph oracle owns; it lands in M3 and does not change this verdict.",
+            "which the graph oracle reports above; it does not change this verdict.",
+            width=_WIDTH,
+        )
+
+    # Said here rather than left to be inferred from the checks table: the
+    # verdict above can read "clean" while the exit code is 1, and the reason is
+    # that graph health is not a divergence to localize. See
+    # localize.BackendSummary.diverged.
+    graph_fails = [entry for entry in verdict.backends if entry.graph_fail]
+    for entry in graph_fails:
+        lines.append("")
+        lines += textwrap.wrap(
+            f"{entry.backend} has {entry.graph_fail} fail-severity graph finding"
+            f"{'' if entry.graph_fail == 1 else 's'}. A graph break is a slower plan "
+            "rather than a different answer, so it names no compilation stage and does "
+            "not move this verdict; --fail-on graph is what turns it into exit code 1.",
             width=_WIDTH,
         )
     return _section("stage", lines, paint)

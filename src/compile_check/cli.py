@@ -38,10 +38,12 @@ from compile_check.oracles import (
     DEFAULT_GRAD_TOL_FACTOR,
     ORACLE_NAMES,
     ORACLES,
+    Baseline,
     Finding,
     OracleConfig,
     run_oracles,
 )
+from compile_check.oracles.graph import BaselineError, read_baseline, write_baseline
 from compile_check.report.terminal import DEFAULT_MAX_FINDINGS, render
 from compile_check.results import RunSet
 
@@ -69,7 +71,6 @@ _PENDING_FLAGS: tuple[tuple[str, str], ...] = (
     ("json", "--json"),
     ("md", "--md"),
     ("budget", "--budget"),
-    ("baseline", "--baseline"),
 )
 
 _EPILOG = """\
@@ -257,6 +258,14 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="FILE",
         help="stored graph-health baseline, so the graph oracle fails on new breaks only",
     )
+    parser.add_argument(
+        "--write-baseline",
+        metavar="FILE",
+        help=(
+            "write this run's graph health as a baseline and carry on; pass the "
+            "same file as --baseline on later runs to fail on new breaks only"
+        ),
+    )
     # Presentation, not semantics: neither of the two below changes what is
     # checked or what the exit code is, only how much of it reaches the
     # terminal. That is why they are not in PLAN.md's flag table, which fixes
@@ -314,7 +323,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         # --probe is a diagnostic that prints a table and exits; it produces no
         # run, so it has nothing to write to the report files. Silently dropping
         # them looked like a failed write, so say so.
-        for flag, value in (("--json", args.json), ("--md", args.md)):
+        for flag, value in (
+            ("--json", args.json),
+            ("--md", args.md),
+            ("--write-baseline", args.write_baseline),
+        ):
             if value is not None:
                 print(f"{PROG}: {flag} ignored with --probe", file=sys.stderr)
         print(format_probe_table(probe_apis()))
@@ -366,11 +379,11 @@ def run(args: argparse.Namespace) -> int:
                 f"{PROG}: {flag} is not implemented yet (it lands in M3), ignored", file=sys.stderr
             )
 
-    runset, fail_on = _guarded_run(args)
+    runset, fail_on, baseline = _guarded_run(args)
     if runset is None:
         return EXIT_ERROR
 
-    cfg = _oracle_config(args, runset)
+    cfg = _oracle_config(args, runset, baseline)
     findings = _compare_backends(runset, cfg)
     verdict = localize(runset, findings)
     print(
@@ -380,6 +393,7 @@ def run(args: argparse.Namespace) -> int:
             verdict,
             fail_on=fail_on,
             grad_tol_factor=cfg.grad_tol_factor,
+            baseline=baseline.path if baseline is not None else None,
             max_findings=args.max_findings,
             color=_use_color(args.color),
         )
@@ -387,12 +401,19 @@ def run(args: argparse.Namespace) -> int:
     return _exit_code(findings, verdict, fail_on)
 
 
-def _oracle_config(args: argparse.Namespace, runset: RunSet) -> OracleConfig:
+def _oracle_config(
+    args: argparse.Namespace,
+    runset: RunSet,
+    baseline: Baseline | None,
+) -> OracleConfig:
     """The knobs the oracles read, built once for both paths.
 
     ``run`` and ``run_only`` compare with the same rules on purpose: the
     developer path exists to show the records behind a verdict, and a config
     that drifted between the two would make it show a different run.
+
+    ``fullgraph`` comes off the runset rather than off ``args`` for the same
+    reason: it is what the run actually did, and the oracles are given records.
     """
     return OracleConfig(
         rtol=args.rtol,
@@ -401,6 +422,8 @@ def _oracle_config(args: argparse.Namespace, runset: RunSet) -> OracleConfig:
         grad_tol_factor=args.grad_tol_factor,
         fp64=args.fp64_oracle,
         fp64_reference=runset.fp64,
+        fullgraph=runset.fullgraph,
+        baseline=baseline,
     )
 
 
@@ -452,7 +475,7 @@ def _use_color(choice: str) -> bool:
     return sys.stdout.isatty() and not os.environ.get("NO_COLOR")
 
 
-def _guarded_run(args: argparse.Namespace) -> tuple[RunSet | None, list[str]]:
+def _guarded_run(args: argparse.Namespace) -> tuple[RunSet | None, list[str], Baseline | None]:
     """Validate the flags, load the target, and run every backend.
 
     M1-1 review carry-over (0): the main path and ``--run-only`` share one
@@ -484,9 +507,15 @@ def _guarded_run(args: argparse.Namespace) -> tuple[RunSet | None, list[str]]:
     ``model = resnet18(weights=None)`` target got fresh random weights on every
     invocation and ``--seed`` said nothing about them.
 
+    ``--baseline`` is read here too, before the run rather than after it: a path
+    that does not exist or a file that does not parse is a typo, and finding it
+    after three lanes have compiled wastes the run. ``--write-baseline`` is the
+    mirror image and happens after, because it records what the run found.
+
     Returns:
-        The runset and the parsed ``--fail-on`` categories, or ``(None, [])``
-        once a one-line tool error has been printed to stderr.
+        The runset, the parsed ``--fail-on`` categories, and the parsed
+        ``--baseline``, or ``(None, [], None)`` once a one-line tool error has
+        been printed to stderr.
     """
     from compile_check.discover import DiscoveryError, load_target
     from compile_check.runner import (
@@ -504,7 +533,15 @@ def _guarded_run(args: argparse.Namespace) -> tuple[RunSet | None, list[str]]:
         fail_on = parse_fail_on(args.fail_on)
     except ValueError as exc:
         _tool_error(str(exc))
-        return None, []
+        return None, [], None
+
+    baseline: Baseline | None = None
+    if args.baseline is not None:
+        try:
+            baseline = read_baseline(args.baseline)
+        except BaselineError as exc:
+            _tool_error(str(exc))
+            return None, [], None
 
     try:
         validate_backends(backends, defer_unknown=True)
@@ -526,15 +563,30 @@ def _guarded_run(args: argparse.Namespace) -> tuple[RunSet | None, list[str]]:
     except (DiscoveryError, RunnerError) as exc:
         # Ours, with a message written for a user: print it as it is.
         _tool_error(str(exc))
-        return None, []
+        return None, [], None
     except Exception as exc:
         # Not ours: a torch internal, a bad --entry object, an OSError. The
         # class name carries information a bare message would not, and the
         # traceback is still available with logging turned up.
         log.debug("the run failed", exc_info=True)
         _tool_error(f"{type(exc).__name__}: {exc}")
-        return None, []
-    return runset, fail_on
+        return None, [], None
+
+    if args.write_baseline is not None:
+        try:
+            written = write_baseline(args.write_baseline, runset)
+        except OSError as exc:
+            _tool_error(f"cannot write the graph baseline {args.write_baseline}: {exc}")
+            return None, [], None
+        # On stderr, so that a report piped to a file stays the report. An
+        # empty list is worth saying out loud: it means no lane had measurable
+        # graph health, and the file on disk is `{}`.
+        print(
+            f"{PROG}: wrote the graph baseline {args.write_baseline} "
+            f"({', '.join(written) if written else 'no lane had measurable graph health'})",
+            file=sys.stderr,
+        )
+    return runset, fail_on, baseline
 
 
 def parse_fail_on(spec: str) -> list[str]:
@@ -571,11 +623,11 @@ def run_only(args: argparse.Namespace) -> int:
     result, which is PLAN.md's rule that a model raising in eager is a tool
     error.
     """
-    runset, fail_on = _guarded_run(args)
+    runset, fail_on, baseline = _guarded_run(args)
     if runset is None:
         return EXIT_ERROR
 
-    cfg = _oracle_config(args, runset)
+    cfg = _oracle_config(args, runset, baseline)
     print(
         format_run_only(
             runset,

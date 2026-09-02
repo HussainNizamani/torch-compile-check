@@ -66,6 +66,18 @@ BACKENDS = ["eager", "aot_eager", "inductor"]
 
 CFG = OracleConfig()
 
+
+def _cfg(runset: Any) -> OracleConfig:
+    """The oracle config for one corpus run.
+
+    ``fullgraph`` is the only knob a case moves, and the graph oracle reads it:
+    a graph break is informational when nobody asked for one graph and a broken
+    promise when ``--fullgraph`` did. A config that did not carry it would grade
+    the fullgraph cases under the wrong rule.
+    """
+    return OracleConfig(fullgraph=runset.fullgraph)
+
+
 # tests/test_corpus_twins.py carries the flags each case needs as the CLI
 # spells them, because that is what it passes to main(). This module calls
 # run_all directly, so they are translated once, here.
@@ -138,9 +150,12 @@ def _rebuild(captured: CapturedException | None) -> Any:
 #   when the base and the view come back together, which is the twin
 #   cases/alias_noop_view.py and the second test in this file.
 #
-# `reports_as = None` means the RED does not reach an oracle at all: 194593's
+# `reports_as = None` means the RED reaches no *correctness* oracle: 194593's
 # compiled lane raises under fullgraph rather than answering differently, which
-# is exit 1 by the raised-lane rule and belongs to no category.
+# is exit 1 by the raised-lane rule and belongs to none of the four categories
+# that compare two lanes. The graph oracle does reach it -- it measures the lane
+# alone and names the break the fullgraph request could not survive -- which is
+# why the assertion below allows graph fails on this row and nothing else.
 CORPUS = (
     pytest.param(
         "alias_slice_scatter_copyback",
@@ -225,8 +240,9 @@ def test_a_corpus_case_reports_exactly_when_its_own_check_says_red(
     # it is the one outcome that must fail loudly rather than skip.
     assert eager.ok, eager.exception
 
+    cfg = _cfg(runset)
     findings: dict[str, list[Finding]] = {
-        lane.backend: run_oracles(eager, lane, CFG) for lane in runset.others
+        lane.backend: run_oracles(eager, lane, cfg) for lane in runset.others
     }
     # check() is asked after every oracle has run, because 195451's RED probe
     # mutates the output it is handed -- writing into the compiled result to
@@ -245,13 +261,18 @@ def test_a_corpus_case_reports_exactly_when_its_own_check_says_red(
                 f"compile-check reported {[f.message for f in fails]}"
             )
         elif reports_as is None:
-            # The raised-lane RED: nothing to compare, so nothing for an oracle
-            # to say. What makes it exit 1 is the lane not running at all.
+            # The raised-lane RED: nothing to compare, so no *correctness*
+            # oracle can say anything. What makes it exit 1 is the lane not
+            # running at all.
             assert not lane.ok, (
                 f"{case} is RED on {lane.backend} because the lane raises, and it "
                 f"returned instead: {message}"
             )
-            assert fails == [], [f.message for f in fails]
+            # The graph oracle is the exception, and since M3-1 it is the one
+            # that explains this RED: 194593 raises under --fullgraph *because*
+            # the graph broke, and graph health is measured from the lane alone
+            # rather than by comparing it with eager. See `reports_as` above.
+            assert {f.oracle for f in fails} <= {"graph"}, [f.message for f in fails]
         else:
             assert {finding.oracle for finding in fails} == reports_as, (
                 f"{case} is RED on {lane.backend} ({message}) and compile-check "
@@ -305,6 +326,33 @@ def test_the_191449_identity_collapse_is_an_alias_fail_on_the_twin(corpus_runs):
     # PLAN.md "Where divergence appears is not always where the fix belongs":
     # the fix landed in AOTAutograd and the divergence still shows at inductor.
     assert localize(runset, findings).first_divergent_backend == "inductor"
+
+
+def test_the_194593_fullgraph_break_is_a_graph_fail_naming_the_branch(corpus_runs):
+    """The graph oracle's view of 194593, which no other oracle can reach.
+
+    Under ``--fullgraph`` the compiled lane raises, so the four oracles that
+    compare two lanes have nothing to compare and the report would otherwise say
+    only "raised Unsupported". The graph oracle traces the same callable without
+    the fullgraph demand and names the break that killed it, which is the
+    diagnosis the issue is about: a data-dependent branch inside
+    ``_kl_binomial_binomial``, not a numerical divergence.
+    """
+    _module, runset = corpus_runs("distributions_validation_branch")
+    inductor = runset.results["inductor"]
+    if inductor.ok:  # pragma: no cover - torch build
+        pytest.skip("this torch captures the branch, so 194593 is fixed here")
+
+    findings = run_oracles(runset.results["eager"], inductor, _cfg(runset), ["graph"])
+    fails = [finding for finding in findings if finding.severity == "fail"]
+
+    assert [f.details["reason"] for f in fails] == ["gb0170: Data-dependent branching"]
+    assert "torch/distributions/kl.py" in str(fails[0].details["user_frame"])
+    assert "_kl_binomial_binomial" in str(fails[0].details["user_frame"])
+    assert "--fullgraph was requested and the graph broke anyway" in fails[0].message
+    # And it still does not name a compilation stage: the ladder places
+    # divergences, and the lane raising is what it placed here.
+    assert localize(runset, findings).first_divergent_backend == "aot_eager"
 
 
 def test_every_corpus_case_has_a_twin_and_a_marker():
