@@ -16,6 +16,9 @@ All notable changes to this project are documented here. The format follows
   `resolve()` is still what discovery uses to find and read the target; only
   what a report shows changed, so `schema_version` stays 2 (value format,
   not shape).
+- README rewritten in user-facing voice; the regression corpus table gains
+  a line noting every bug in it was found by hand before this tool
+  existed; prior-art row for `torch.library.opcheck`.
 
 ### Fixed
 

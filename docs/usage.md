@@ -78,6 +78,22 @@ and a namespace `bundle` whose `make_inputs` staticmethod is the input
 factory — neither name is one discovery looks for on its own, which is what
 makes this the override fixture.
 
+## What pointing the tool at a file does to your interpreter
+
+A target given as a file path is imported by executing it, which is the
+only way to get at the model it defines. Two side effects of that are
+deliberate and worth knowing before you point the tool at something:
+
+- the file's parent directory is inserted at `sys.path[0]`, so a target that
+  imports a sibling module works — that is what a two-file repro needs;
+- the module is registered in `sys.modules` under the file's stem, so a
+  dataclass, a pickle, or a self-import inside the target resolves. If that
+  name is already taken by an unrelated module the target is registered as
+  `_torch_compile_check_target_<stem>` instead, rather than shadowing it.
+
+Both happen in the `torch-compile-check` process only. Nothing is written to your
+project, and nothing outlives the command.
+
 ## Run configuration
 
 ### `--backends LIST`
