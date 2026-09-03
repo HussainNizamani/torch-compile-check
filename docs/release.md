@@ -25,8 +25,10 @@ $ python -c "import torch_compile_check; print(torch_compile_check.__version__)"
 $ ruff check . && ruff format --check . && mypy src/ && pytest -q
 ```
 
-`CHANGELOG.md` still says `## [Unreleased] → 0.1.0` at this point, which is
-accurate: the tag has not happened. Step 8 is where that heading changes.
+`CHANGELOG.md` already carries an empty `## [Unreleased]` above the dated
+`## [0.1.0] - YYYY-MM-DD` section at this point -- that split happened ahead
+of the tag, in release prep. Step 8 only checks the date on that heading
+still matches the day the tag actually happens.
 
 Check that CI is green on the commit you are about to tag, not merely on some
 recent commit. Asking for that commit's own check runs is the version-agnostic
@@ -123,9 +125,10 @@ is private. **Reversible**, awkwardly: `git tag -d v0.1.0` and
 `git push origin :refs/tags/v0.1.0` remove it, but anyone who already fetched
 keeps their copy. Do not reuse a tag name for different content.
 
-Optionally, a GitHub release. Its notes are the `[Unreleased] → 0.1.0` section
-of `CHANGELOG.md` — that is still its heading at this point, because step 8 is
-where it is renamed:
+Optionally, a GitHub release. Its notes are the `[0.1.0]` section of
+`CHANGELOG.md`, with the empty `[Unreleased]` heading above it along for the
+ride — the range below already spans both, down to the `[Unreleased]:` link
+reference at the end of the file:
 
 ```console
 $ sed -n '/^## \[Unreleased\]/,/^\[Unreleased\]:/p' CHANGELOG.md > /tmp/notes.md
@@ -285,9 +288,13 @@ order:
       `password`) and read what that finds too — it is noisy, and reading the
       noise is the job.
 - [ ] **Absolute paths and machine names** in committed output:
-      `grep -rn "/home/ubuntu" --include="*.md" --include="*.py" .` — pasted
-      terminal output is the usual source. One hit as of the M4-3 branch, and
-      it is this line.
+      `grep -rn "/home/" --include="*.md" --include="*.py" --include="*.json" .`
+      — pasted terminal output is the usual source, and a committed report is
+      a machine-generated one: `validation/results/per-target/*.json` shipped
+      a contributor's `/home/.../torch-compile-check` in `target.file` for
+      days before the `*.json` include was added here (the path-hygiene
+      finding, x86 RC round) — the `*.md`/`*.py`-only command above had
+      already run clean on this branch and missed it.
 - [ ] **`validation/results/*.json`** and `docs/validation.md`: they carry the
       platform string of the machine that produced them. Intended, but look at
       what is actually in them.
