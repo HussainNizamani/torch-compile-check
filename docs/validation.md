@@ -105,15 +105,21 @@ only the single-host table above.)
 |---|---|---|---|---|---|---|
 | aarch64 CPU (reference) | estate, aarch64 | `2.14.0+cpu` (git `08187d9e0fba`) | 3.10.12 | `torch-compile-check 0.1.0` @ `570b789` (content-identical to main) | 6/6 clean, exit 0, 0 findings | `per-target/aarch64-2.14.0+cpu/` |
 | x86_64 CPU | ProBook, AVX2 | `2.14.0+cpu` | 3.12.14 | `compile-check 0.1.0` @ `4caf42c` | 6/6 parity holds, exit 0, 0 findings | `per-target/x86_64-2.14.0+cpu/` |
-| x86_64 CPU (Omen leg) | Omen, Ryzen 4800H | `2.14.0+cu126` | 3.12.13 | `compile-check 0.1.0` @ `dcaf77d` | 6/6 clean, exit 0, 0 findings | pending collection |
-| x86_64 + CUDA sm_75 | Omen, GTX 1660 Ti | `2.14.0+cu126` | 3.12.13 | `compile-check 0.1.0` @ `dcaf77d` | 6/6 clean, exit 0, 0 findings | pending collection |
+| x86_64 CPU (Omen leg) | Omen, Ryzen 4800H | `2.14.0+cu126` | 3.12.13 | `compile-check 0.1.0` @ `dcaf77d` | 6/6 clean, exit 0, 0 findings | `per-target/x86_64-2.14.0+cu126-cpu/` |
+| x86_64 + CUDA sm_75 | Omen, GTX 1660 Ti | `2.14.0+cu126` | 3.12.13 | `compile-check 0.1.0` @ `dcaf77d` | 6/6 clean, exit 0, 0 findings | `per-target/x86_64-2.14.0+cu126-cuda/` |
 
 The aarch64 and ProBook legs are diffed from committed JSONs here
 (`diff_parity.py`, 6/6 `parity holds`; transcript in `docs/cross-arch.md`).
-The two Omen legs (CPU and CUDA, torch `2.14.0+cu126`) are transcribed from
-Turing's 2026-09-03 00:56 UTC report: 12 runs (6 targets x CPU and CUDA),
-every one exit 0 with 0 findings and `schema_version` 2, and
-`environment.cuda_available=True` on both (a box fact, not the run device).
-Their physical per-target JSONs (`per-target/x86_64-2.14.0+cu126-cpu/` and
-`per-target/x86_64-2.14.0+cu126-cuda/`) are pending collection from the Omen
-and land in a follow-up PR.
+The two Omen legs (CPU and CUDA, torch `2.14.0+cu126`) were first
+transcribed from Turing's 2026-09-03 00:56 UTC report and are now committed
+as physical per-target JSONs alongside the other two legs
+(`per-target/x86_64-2.14.0+cu126-cpu/` and
+`per-target/x86_64-2.14.0+cu126-cuda/`). All 12 pairs (6 targets x CPU and
+CUDA) hold parity against the aarch64 reference by the same `diff_parity.py`
+used above -- `environment.machine` and `environment.cuda_available` print
+`DIFFERENT` on every pair (`aarch64` vs `x86_64`, `False` vs `True`) and are
+not gated, same as the ProBook comparison; a second transcript, for a CUDA
+pair, is in `docs/cross-arch.md`. The Omen runs also added `--fp64-oracle`
+(`run.fp64` is `true` in all twelve of these files) while the aarch64 and
+ProBook runs did not; the parity comparison above does not read that
+field.
