@@ -1,0 +1,112 @@
+name: publish
+
+# Builds the distributions once and hands them, unmodified, to TestPyPI and
+# then PyPI through PyPI's Trusted Publishing (OIDC): no API token lives in
+# this repository, in a GitHub secret, or anywhere else. Each of the two
+# upload jobs runs under its own GitHub *environment* (`testpypi` / `pypi`)
+# rather than a bare job, because an environment is what lets a maintainer
+# require a manual reviewer click before the job proceeds -- docs/release.md
+# "5b" is the one-time setup on both PyPI's side (registering this workflow
+# as a pending publisher) and GitHub's side (adding required reviewers to
+# each environment). Neither environment needs a `url:` here; PyPI's own
+# publish action reports the project page in its own step summary.
+#
+# Trusted Publishing does not require this repository to be public: GitHub
+# issues the OIDC token from a private repository the same as a public one,
+# and PyPI's pending-publisher check verifies the token's owner/repo/
+# workflow/environment claims, not the repository's visibility. See 5b.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the build and check tooling
+        run: python -m pip install build twine
+
+      - name: Build the sdist and wheel
+        run: python -m build
+
+      # Validates the metadata and the long description PyPI would render,
+      # the same check docs/release.md step 1 runs by hand before a manual
+      # upload -- catching a packaging mistake here, before either upload
+      # job, rather than on TestPyPI's own rejection.
+      - name: twine check
+        run: python -m twine check dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+          if-no-files-found: error
+
+  # TestPyPI first, always: a filename that has been uploaded can never be
+  # uploaded again even after deleting the release (docs/release.md step 4),
+  # so this is the rehearsal that costs a TestPyPI version number instead of
+  # a real one. `if: github.event_name == 'push'` keeps a manual
+  # workflow_dispatch run (used to rebuild an artifact or test the build job
+  # alone) from also spending a TestPyPI upload; only an actual `v*` tag push
+  # reaches either upload job.
+  publish-testpypi:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name == 'push'
+    environment: testpypi
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          # TestPyPI's project is reused across every rehearsal, unlike the
+          # real one; without this, re-running the same tag (workflow_dispatch
+          # after a fix, or a re-run of a failed job) would fail the whole job
+          # on a duplicate filename instead of leaving the earlier upload be.
+          skip-existing: true
+
+  # No `if:` here: the environment's own required reviewers (docs/release.md
+  # 5b) are what turns this job into a manual approval gate. A
+  # workflow_dispatch run never reaches this job because publish-testpypi,
+  # its only dependency, does not run for one -- see the comment there.
+  publish-pypi:
+    needs: publish-testpypi
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: pypi
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
