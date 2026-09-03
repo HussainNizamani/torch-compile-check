@@ -28,9 +28,12 @@ requires-python = ">=3.10"
 # `license = {text = "MIT"}` with the classifier added back as the fallback.
 license = "MIT"
 license-files = ["LICENSE"]
-authors = [{ name = "Hussain Nizamani" }]
+authors = [
+  { name = "Hussain Nizamani", email = "131136731+HussainNizamani@users.noreply.github.com" },
+]
 keywords = [
   "pytorch",
+  "torch",
   "torch.compile",
   "inductor",
   "testing",
@@ -98,7 +101,7 @@ torch-compile-check = "torch_compile_check.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/HussainNizamani/torch-compile-check"
-Source = "https://github.com/HussainNizamani/torch-compile-check"
+Repository = "https://github.com/HussainNizamani/torch-compile-check"
 Documentation = "https://github.com/HussainNizamani/torch-compile-check/blob/main/docs/README.md"
 Issues = "https://github.com/HussainNizamani/torch-compile-check/issues"
 Changelog = "https://github.com/HussainNizamani/torch-compile-check/blob/main/CHANGELOG.md"
