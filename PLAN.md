@@ -585,6 +585,14 @@ pass. Custom operator and higher-order-operator awareness, since a
 custom op with an unregistered fake kernel is a distinct and common failure mode that
 v1 detects only indirectly.
 
+Precision handling improvements: dtype-aware tolerance defaults (one ULP of the
+output dtype rather than float32-fixed), automatic re-run with
+`TORCHINDUCTOR_EMULATE_PRECISION_CASTS=1` to distinguish precision gaps from true
+divergences, and recording expected and actual values at the max-absolute-difference
+and max-relative-difference indices in the JSON so reduced repros stay oriented.
+Broader CUDA support: bf16 and Ampere hunts need an sm_80+ GPU box, a resource
+gap noted by the stable validation round.
+
 ## Quality and process gates
 
 Every merged change carries tests. Every oracle has both positive coverage (it

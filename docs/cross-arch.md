@@ -322,6 +322,28 @@ findings: 0 vs 1, sets differ -- NOT parity
 Comparing the *same* target across two machines is the real use of this
 script; the cross-architecture pair above is that use in earnest.
 
+## Nightly hunt (2026-09-03)
+
+The tool ran through a live nightly regression suite on a CUDA box to
+establish whether any new upstream bugs were present on the current torch
+nightly wheel. torch `2.15.0.dev20260829+cu126` (git `332a69317e22`),
+GTX 1660 Ti (sm_75), driver 610.43.03, and `torch-compile-check 0.1.0` @ `7cfd762`:
+
+| Lane | Setup | Result |
+|---|---|---|
+| **1. baseline** (6 targets + 5 corpus) | torch nightly, device cuda, fp64-oracle | corpus 5/5 identical to stable; all 6 targets clean exit 0 |
+| **2. fp16 numerics + backward** | same nightly, dtype float16, --grad | forward: hf_tiny_bert and tv_resnet18 outputs differ by one float16 ULP (0.00390625); backward: gradients differ more, and the fp64 oracle is closer to inductor on every diverging gradient (eager float16 backward underflows without loss scaling); tv_vit_tiny: one gradient finding 1.6x over tolerance; with TORCHINDUCTOR_EMULATE_PRECISION_CASTS=1 hf_tiny_bert's 19 findings drop to 0 and tv_resnet18's remain but eager and inductor tie against fp64; known behaviour, pytorch #168126 and #182131 |
+| **3. training step fp32** | same nightly, train_step_sgd + L1 | fp32 clean; no divergence on autograd.grad graph breaks |
+| **4. view/in-place oracle** (7 targets) | same nightly, alias-heavy slice, fp64-oracle | all 7 clean: slice_scatter_inplace, index_put_inplace, masked_fill_inplace, view_row_add_inplace, transpose_copy_inplace, chunk_cat_roundtrip, autograd_fn_view_output |
+| **5. dynamic shapes** (probe) | same nightly, chunk_cat (4,8)+(6,16); resnet18 (1,3,64,64)+(2,3,96,96) | clean on both sizes |
+| **bf16 unsupported** | same nightly, dtype bfloat16, all 6 targets | inductor raised BF16 is not supported on sm_75 (all 6 targets) |
+
+No new upstream bug was found; the README's "none yet" line stands. fp16 and
+bf16 are not validated precisions in v0.1. The default tolerances are
+tuned for float32: `atol 1e-5` is about 390 times tighter than one float16
+ULP at the magnitude of these outputs (0.00390625 at values between 4 and 8),
+so every float16 rounding difference is reported as a finding.
+
 ## What "parity" means
 
 Parity, in v1, is a fact about one target on two runs: the same

@@ -319,7 +319,8 @@ at fp32" rather than reported as a compiler bug. `train_step_mlp` and
 not numerics, and the fp64 pass has nothing extra to add to a well-
 conditioned two-layer MLP; the BERT target's embedding lookup is integer-
 indexed and unaffected by the pass either way, so it is left off for speed
-rather than for a numerics reason.
+rather than for a numerics reason. fp16 and bf16 are not validated precisions
+in v0.1; see docs/cross-arch.md, Nightly hunt.
 
 ## Extras
 
