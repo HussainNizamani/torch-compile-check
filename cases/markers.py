@@ -7,7 +7,7 @@ version or commit where it was fixed, and the test suite reads the marker and
 the running torch version to decide whether the case is expected to produce a
 finding or expected to be clean.
 
-This module is that marker table, as data rather than as prose in five
+This module is that marker table, as data rather than as prose in seven
 docstrings. The docstrings stay, because a case file has to explain itself to
 someone reading it alone; what lives here is the part a test and a CI summary
 have to be able to *compute* with. :func:`expected_verdict` is the one place the
@@ -186,14 +186,19 @@ class CaseMarker:
     """One sentence a human needs that the fields above do not carry."""
 
 
-# The five C-1 corpus cases. Every RED below was measured, not assumed; the
-# provenance is in FINDINGS.md and in each case's own docstring.
+# The seven corpus cases: the five C-1 cases, plus two reviewer-reported
+# siblings of 195451 added 2026-09-03 (alias_view_slice_scatter_copyback,
+# alias_diagonal_scatter_index_put_chain -- see cases/README.md and
+# FINDINGS.md). Every RED below was measured, not assumed; the provenance is
+# in FINDINGS.md and in each case's own docstring.
 #
-# The measurements this table was written from: torch 2.14.0+cpu, git
+# The five C-1 measurements were taken together: torch 2.14.0+cpu, git
 # 08187d9e0fba026dc8217405802ab5381dc88d90, aarch64, CPU-only, caches disabled,
 # 2026-09-02. Four of the five scripts exit 1 there and
 # numerics_cpu_inductor_miscompile exits 0. The 2.15.0.dev20260901+cpu column
-# comes from the C-1 clean-venv run recorded in FINDINGS.md.
+# comes from the C-1 clean-venv run recorded in FINDINGS.md. The two
+# 2026-09-03 additions were measured separately, on torch 2.14.0+cpu (the
+# same git hash) only; see their own entries below.
 MARKERS: dict[str, CaseMarker] = {
     "alias_slice_scatter_copyback": CaseMarker(
         case="alias_slice_scatter_copyback",
@@ -271,6 +276,39 @@ MARKERS: dict[str, CaseMarker] = {
         fix_pr=190966,
         fixed_in_release="2.14.0",
         note="fixed upstream by #190966 (ModularIndexing negativity guard); GREEN from 2.14 on",
+    ),
+    # Reviewer-reported siblings of alias_slice_scatter_copyback, both found
+    # on PR #195484 and reported 2026-09-03. PR head 316140e0fec was tested
+    # against both cases on 2026-09-03 and does not fix either.
+    "alias_view_slice_scatter_copyback": CaseMarker(
+        case="alias_view_slice_scatter_copyback",
+        issue=195451,
+        oracle="alias",
+        manifests_as="finding",
+        signal="inductor-only miscompile",
+        known_bad=("2.14.0",),
+        known_bad_git=("08187d9e0fba026dc8217405802ab5381dc88d90",),
+        note=(
+            "reviewer-reported sibling of alias_slice_scatter_copyback (2026-09-03): "
+            "the scatter target is a view of the graph input rather than the input "
+            "itself. Fix pending in PR 195484, which as of 2026-09-02 does not "
+            "claim to cover this shape."
+        ),
+    ),
+    "alias_diagonal_scatter_index_put_chain": CaseMarker(
+        case="alias_diagonal_scatter_index_put_chain",
+        issue=195451,
+        oracle="alias",
+        manifests_as="finding",
+        signal="inductor-only miscompile",
+        known_bad=("2.14.0",),
+        known_bad_git=("08187d9e0fba026dc8217405802ab5381dc88d90",),
+        note=(
+            "reviewer-reported sibling of alias_slice_scatter_copyback (2026-09-03): "
+            "a chained diagonal_scatter then index_put before the copy-back. Fix "
+            "pending in PR 195484, which as of 2026-09-02 does not claim to cover "
+            "this shape."
+        ),
     ),
 }
 

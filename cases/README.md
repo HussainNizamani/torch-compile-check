@@ -27,6 +27,16 @@ Two shapes of file live here, and the difference is deliberate.
   runs the standalone script and its twin together on every test run and
   asserts they agree, so the two files cannot drift apart silently.
 
+Two more cases, `alias_view_slice_scatter_copyback.py` and
+`alias_diagonal_scatter_index_put_chain.py`, are reviewer-reported siblings
+of `alias_slice_scatter_copyback.py` -- a PR #195484 reviewer reported both
+shapes 2026-09-03, and they were added outside the C-1 slice rather than
+folded into it. Each combines the two shapes above into one file: the
+standalone `build()`/`check()`/`main()` protocol, plus the module-level `fn`
+and `inputs` the discovery convention looks for, so the same file is both
+the RED/GREEN script `FINDINGS.md` keys on and its own twin --
+`tests/test_corpus_twins.py` names it in both columns.
+
 Two modules here are not cases at all.
 
 - `markers.py` is the known-bad version table: per case, the torch versions and

@@ -119,7 +119,7 @@ that lives in `cases/` (ground truth in [FINDINGS.md](FINDINGS.md)).
 
 | Bug | Issue | Fix | Status | Oracle |
 |---|---|---|---|---|
-| Inductor reinplacing breaks an output-aliases-input contract | [#195451](https://github.com/pytorch/pytorch/issues/195451) | [PR #195484](https://github.com/pytorch/pytorch/pull/195484) | open, unmerged | alias |
+| Inductor reinplacing breaks an output-aliases-input contract, in three shapes (direct copy-back; copy-back through a view; a chained `diagonal_scatter`/`index_put`) | [#195451](https://github.com/pytorch/pytorch/issues/195451) | [PR #195484](https://github.com/pytorch/pytorch/pull/195484) | open, unmerged | alias |
 | AOTAutograd aliased-output identity | [#191449](https://github.com/pytorch/pytorch/issues/191449) | [PR #191844](https://github.com/pytorch/pytorch/pull/191844) | merged 2026-09-02 | alias |
 | Silent dtype promotion: int8 matmul becomes int64 on CPU inductor | [#191308](https://github.com/pytorch/pytorch/issues/191308) | none filed yet | open, unfixed | metadata |
 | Distributions crossed with compile: a validation branch diverges under `--fullgraph` | [#194593](https://github.com/pytorch/pytorch/issues/194593) (sibling [#194596](https://github.com/pytorch/pytorch/issues/194596)) | none filed yet | open, unfixed | graph |

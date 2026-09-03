@@ -1,11 +1,14 @@
 # The regression corpus
 
-`cases/` holds one tiny model per known `torch.compile` bug class — five, as
-of this table, one row per bug class in [PLAN.md "Why this project, and why
-us"](../PLAN.md). The detailed reference — how the two file shapes in it
-relate, what `markers.py` and `summary.py` do, and the walkthrough for
-adding a new case — is [`cases/README.md`](../cases/README.md); this page is
-the short version plus what running it looks like today.
+`cases/` holds one tiny model per known `torch.compile` bug class: five bug
+classes, one row per bug class in [PLAN.md "Why this project, and why
+us"](../PLAN.md), plus two more cases that are reviewer-reported sibling
+shapes of one of them ([#195451](https://github.com/pytorch/pytorch/issues/195451),
+`cases/README.md`), seven cases in total as of this table. The detailed
+reference, covering how the file shapes in it relate, what `markers.py` and
+`summary.py` do, and the walkthrough for adding a new case, is
+[`cases/README.md`](../cases/README.md); this page is the short version plus
+what running it looks like today.
 
 ## Two files per case
 
@@ -22,6 +25,13 @@ the short version plus what running it looks like today.
   every standalone script and its twin together on every test run and
   asserts they agree on exit code and stage line, so the two cannot drift
   apart silently.
+
+Two cases, `alias_view_slice_scatter_copyback.py` and
+`alias_diagonal_scatter_index_put_chain.py` -- reviewer-reported sibling
+shapes of `alias_slice_scatter_copyback.py`'s bug, added 2026-09-03 outside
+the original slice -- combine both shapes into one file instead: the same
+file is the standalone script and, by also exposing module-level `fn` and
+`inputs`, its own twin. See `cases/README.md` for why.
 
 ## The known-bad marker
 
@@ -47,15 +57,17 @@ $ python -m cases.summary
 | `dtype_int8_matmul_promotion` | #191308 | metadata | RED | RED | yes |
 | `distributions_validation_branch` | #194593 | graph | RED | RED | yes |
 | `numerics_cpu_inductor_miscompile` | #190765 | numerics | GREEN | GREEN | yes |
+| `alias_view_slice_scatter_copyback` | #195451 | alias | RED | RED | yes |
+| `alias_diagonal_scatter_index_put_chain` | #195451 | alias | RED | RED | yes |
 
-5 cases: 5 agree with the marker, 0 disagree, 0 could not be placed.
+7 cases: 7 agree with the marker, 0 disagree, 0 could not be placed.
 ```
 
 (The real run links every issue number; trimmed here for width.) This is
 the same table CI appends to the job summary on every matrix cell — real,
 executed output, not a description of one.
 
-Each script compiles, so the five of them cost about a minute. The verdicts
+Each script compiles, so the seven of them cost about a minute. The verdicts
 are cached in a JSON file under the system temporary directory, and CI's
 job-summary step reuses what the `pytest` step in the same job already
 measured; when it does, the tally line says so. An entry is reused only when

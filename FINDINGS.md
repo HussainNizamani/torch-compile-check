@@ -1,8 +1,10 @@
 # FINDINGS
 
-Ground truth for the five regression-corpus cases in `cases/`. Filled only
-from runs actually executed for slice C-1 (see the PR's Evidence Report for
-full command/output transcripts).
+Ground truth for the seven regression-corpus cases in `cases/`: the five
+filled from runs actually executed for slice C-1 (see that PR's Evidence
+Report for full command/output transcripts), plus two reviewer-reported
+siblings of `alias_slice_scatter_copyback.py` added 2026-09-03 (their own
+runs are below, under "Reviewer-reported siblings of 195451").
 
 **Canonical verification run:** `/tmp/baumeister_clean_venv`, a venv created
 fresh for this purpose (`pip install --index-url
@@ -67,6 +69,41 @@ in a venv created fresh for this slice.
 | `numerics_polyjuice_minmax.py` | `numerics_cpu_inductor_miscompile.py` | `compile-check cases/numerics_polyjuice_minmax.py --dynamic` | exit 0, clean (matches the standalone's GREEN on this build) | none observed (fixed upstream) |
 | `dtype_promotion.py` | `dtype_int8_matmul_promotion.py` | `compile-check cases/dtype_promotion.py` | exit 1, metadata finding, first diverges at `inductor` | inductor-only miscompile |
 | `alias_copyback.py` | `alias_slice_scatter_copyback.py` | `compile-check cases/alias_copyback.py` | exit 1, alias finding, first diverges at `inductor` | inductor-only miscompile |
+
+### Reviewer-reported siblings of 195451 (2026-09-03)
+
+Two more cases, not part of the C-1 slice above: a reviewer on
+[PR #195484](https://github.com/pytorch/pytorch/pull/195484) reported these
+two additional shapes of the alias bug on 2026-09-03 -- one where the scatter
+target is a view of the graph input rather than the input itself, one where
+a chained `diagonal_scatter`/`index_put` is reinplaced. Verified 2026-09-03
+in this repository's own venv, torch `2.14.0+cpu` (git
+`08187d9e0fba026dc8217405802ab5381dc88d90`), aarch64, CPU-only,
+`TORCHINDUCTOR_FORCE_DISABLE_CACHES=1`. Neither file has a separate
+discovery-convention twin (`cases/README.md`): each exposes the module-level
+`fn` and `inputs` PLAN.md's discovery convention looks for in the same file
+as its own standalone `build()`/`check()`/`main()` script, so the file below
+is both the standalone RED/GREEN script and the `compile-check` run beside
+it.
+
+| Case | Issue | PR | Status upstream | Oracle | First diverging backend | Signal type | RED on (torch versions run) | GREEN on (torch versions run) |
+|---|---|---|---|---|---|---|---|---|
+| `alias_view_slice_scatter_copyback.py` | [#195451](https://github.com/pytorch/pytorch/issues/195451) | [#195484](https://github.com/pytorch/pytorch/pull/195484) (open, unmerged; its diff does not claim to cover this view shape) | open, unmerged upstream | alias | `inductor` (not separately confirmed against `aot_eager` on this build) | inductor-only miscompile | 2.14.0+cpu, aarch64, CPU (this repository's venv, default `inductor`) | not run |
+| `alias_diagonal_scatter_index_put_chain.py` | [#195451](https://github.com/pytorch/pytorch/issues/195451) | [#195484](https://github.com/pytorch/pytorch/pull/195484) (open, unmerged; its diff does not claim to cover this chained shape) | open, unmerged upstream | alias | `inductor` (not separately confirmed against `aot_eager` on this build) | inductor-only miscompile | 2.14.0+cpu, aarch64, CPU (this repository's venv, default `inductor`) | not run |
+
+Standalone script RED lines, verbatim from a live run on this box:
+
+```
+RED alias_view_slice_scatter_copyback torch=2.14.0+cpu git=08187d9 arch=aarch64 backend=inductor :: compiled output aliases input (data_ptr equal) and mutating the output corrupted the input: before=[[100.0, 2.0, 3.0], [200.0, 5.0, 6.0], [300.0, 8.0, 9.0], [400.0, 11.0, 12.0]] after=[[200.0, 102.0, 103.0], [300.0, 105.0, 106.0], [400.0, 108.0, 109.0], [500.0, 111.0, 112.0]]
+RED alias_diagonal_scatter_index_put_chain torch=2.14.0+cpu git=08187d9 arch=aarch64 backend=inductor :: compiled output aliases input (data_ptr equal) and mutating the output corrupted the input: before=[[100.0, 200.0], [3.0, 20.0]] after=[[200.0, 300.0], [103.0, 120.0]]
+```
+
+`compile-check` run through the tool itself, same file, verbatim finding message:
+
+| File | compile-check invocation | Result | Signal type |
+|---|---|---|---|
+| `alias_view_slice_scatter_copyback.py` | `compile-check cases/alias_view_slice_scatter_copyback.py` | exit 1, alias finding (`alias_added`), "inductor output[1] aliases input[0] (same storage, overlapping bytes) and the eager pair does not", first diverges at `inductor` | inductor-only miscompile |
+| `alias_diagonal_scatter_index_put_chain.py` | `compile-check cases/alias_diagonal_scatter_index_put_chain.py` | exit 1, alias finding (`identity_added`), "inductor returned input[0] itself as output[0] and eager returned a distinct object", first diverges at `inductor` | inductor-only miscompile |
 
 ## Notes on surprises (not predicted by the slice brief)
 

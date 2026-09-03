@@ -13,6 +13,14 @@ already uses for `alias_copyback.py`. A standalone script that exits 2
 (crashed outright) skips the pair rather than asserting anything -- a crash
 means the case cannot even establish RED or GREEN on this torch, which is
 not the tool's failure to catch.
+
+Two entries below name the same file in both columns:
+`alias_view_slice_scatter_copyback` and
+`alias_diagonal_scatter_index_put_chain`, the reviewer-reported siblings of
+`alias_slice_scatter_copyback` (`cases/markers.py`), have no separate
+discovery-convention twin -- each file exposes the module-level `fn` and
+`inputs` PLAN.md's discovery convention looks for, in addition to the
+standalone script shape, so it is its own twin.
 """
 
 from __future__ import annotations
@@ -74,6 +82,25 @@ TWINS = (
         ("--dynamic",),
         "inductor",
         id="numerics_cpu_inductor_miscompile",
+    ),
+    # Reviewer-reported siblings of alias_slice_scatter_copyback (2026-09-03),
+    # not part of the original C-1 slice and with no separate twin file: each
+    # exposes the module-level `fn` and `inputs` PLAN.md's discovery
+    # convention looks for in the same file as its own standalone script, so
+    # it names itself in both columns here.
+    pytest.param(
+        "alias_view_slice_scatter_copyback.py",
+        "alias_view_slice_scatter_copyback.py",
+        (),
+        "inductor",
+        id="alias_view_slice_scatter_copyback",
+    ),
+    pytest.param(
+        "alias_diagonal_scatter_index_put_chain.py",
+        "alias_diagonal_scatter_index_put_chain.py",
+        (),
+        "inductor",
+        id="alias_diagonal_scatter_index_put_chain",
     ),
 )
 
