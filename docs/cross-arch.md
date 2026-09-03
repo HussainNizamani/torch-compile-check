@@ -232,18 +232,24 @@ repository's own committed run for the same target
 (`validation/results/2026-09-02-aarch64-2.14.0+cpu.json` is the summary
 file, not per-target — regenerate a per-target aarch64 baseline with step 3
 above once, commit it, and diff against that). Two real runs of the script
-here, both against files produced in steps 2 and 3 above, to show what
-"parity holds" and "NOT parity" each look like — an aarch64/x86/CUDA pair is
-not available on this box yet, so this is the same script exercised on two
-same-architecture runs that are known, respectively, to agree and to
-disagree:
+below show what "parity holds" and "NOT parity" each look like. The first
+is a genuine cross-architecture pair — the committed aarch64 reference
+against the ProBook's x86_64 run of the same target — so
+`environment.machine` reads `DIFFERENT`, is printed, and is not gated; the
+finding sets are identical, so parity holds:
 
 ```console
-$ python diff_parity.py results/aarch64/train_step_mlp.json results/aarch64/train_step_mlp.json
-environment.machine: 'aarch64' vs 'aarch64' (same)
+$ python diff_parity.py validation/results/per-target/aarch64-2.14.0+cpu/train_step_mlp.json validation/results/per-target/x86_64-2.14.0+cpu/train_step_mlp.json
+environment.machine: 'aarch64' vs 'x86_64' (DIFFERENT)
 environment.cuda_available: False vs False (same)
 findings: 0 on each side, identical set -- parity holds
 ```
+
+All six targets read `parity holds` this way across the aarch64 reference
+and the ProBook x86_64 set (2026-09-03; recorded per leg in
+`docs/validation.md`). The second run below is two *different* targets on
+one machine, kept only to prove the "NOT parity" branch fires on a real
+mismatch rather than being untested code:
 
 ```console
 $ torch-compile-check cases/dtype_promotion.py --json results/aarch64/dtype_promotion.json
@@ -254,10 +260,8 @@ findings: 0 vs 1, sets differ -- NOT parity
   only in b: ('metadata', 'inductor', 0, 'fail')
 ```
 
-The second pair is two different targets, not two architectures — shown
-only to prove the "NOT parity" branch of the script actually fires on a real
-mismatch rather than being untested code. Comparing the *same* target across
-two machines is the real use of this script.
+Comparing the *same* target across two machines is the real use of this
+script; the cross-architecture pair above is that use in earnest.
 
 ## What "parity" means
 
