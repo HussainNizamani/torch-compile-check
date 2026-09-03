@@ -3,7 +3,7 @@
 ``python -m cases.summary`` from the repository root runs each standalone
 RED/GREEN script in ``cases/`` and prints one table of observed against expected
 verdicts. CI appends it to ``$GITHUB_STEP_SUMMARY`` on every matrix cell, so the
-question "which of the five bugs does *this* torch still have" is answered on
+question "which of the seven cases does *this* torch still have" is answered on
 the job page rather than by reading a log. ``python cases/summary.py`` works
 too, because every other file in this directory does and a module that broke the
 habit would be a papercut; see the bootstrap below the imports.

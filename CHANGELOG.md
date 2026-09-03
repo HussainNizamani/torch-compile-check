@@ -8,6 +8,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **corpus-195451-siblings**: two more regression-corpus cases, reviewer-
+  reported on PR #195484 and reported 2026-09-03: `cases/alias_view_slice_scatter_copyback.py`
+  (the scatter target is a view of the graph input rather than the input
+  itself) and `cases/alias_diagonal_scatter_index_put_chain.py` (a chained
+  `diagonal_scatter` then `index_put` before the copy-back). Both reproduce
+  RED on inductor, GREEN-clean on `aot_eager`, verified on torch 2.14.0+cpu;
+  neither has a separate discovery-convention twin -- each file exposes the
+  module-level `fn` and `inputs` the discovery convention looks for, in
+  addition to the standalone `build()`/`check()`/`main()` shape, so it is
+  its own twin. `cases/markers.py` gets a `CaseMarker` for each, `FINDINGS.md`
+  a ground-truth entry for each, and the corpus is seven cases as of this
+  entry. README's regression-corpus table extends the #195451 row's
+  description to name all three shapes rather than adding new rows for the
+  same issue.
 - **nightly-hunt-2026-09-03**: documentation of a CUDA-nightly regression
   hunt on torch `2.15.0.dev20260829+cu126` with no new upstream bugs found.
   New "Nightly hunt (2026-09-03)" section in `docs/cross-arch.md` records

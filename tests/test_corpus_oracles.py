@@ -104,6 +104,26 @@ def _live_input_and_output(eager: BackendResult, lane: BackendResult) -> tuple[A
     )
 
 
+def _live_input_and_second_output(
+    eager: BackendResult, lane: BackendResult
+) -> tuple[Any, Any, Any]:
+    """The (input, output) pair alias_view_slice_scatter_copyback's ``check()``
+    reads data pointers off.
+
+    Same shape as :func:`_live_input_and_output`, at ``output_refs[1]`` rather
+    than ``[0]``: that case's ``fn`` returns ``(before, updated)``, and it is
+    ``updated`` -- the second output -- the alias oracle finds aliasing `x`.
+    Returning ``before`` alongside it is what makes Inductor's reinplace pass
+    treat the view as eliminable in the first place; dropping it stops the
+    case from reproducing (see the case's own docstring).
+    """
+    return (
+        (eager.input_refs[0], eager.output_refs[1]),
+        (lane.input_refs[0], lane.output_refs[1]),
+        None,
+    )
+
+
 def _raised_or_returned(eager: BackendResult, lane: BackendResult) -> tuple[Any, Any, Any]:
     """The ``(raised, payload)`` pair 194593's ``check()`` reads.
 
@@ -186,6 +206,21 @@ CORPUS = (
         _repeated_outputs,
         frozenset({"numerics"}),
         id="numerics_cpu_inductor_miscompile",
+    ),
+    # Reviewer-reported siblings of alias_slice_scatter_copyback (2026-09-03),
+    # not part of the original C-1 slice; see cases/README.md and
+    # cases/markers.py's note on each.
+    pytest.param(
+        "alias_view_slice_scatter_copyback",
+        _live_input_and_second_output,
+        frozenset({"alias"}),
+        id="alias_view_slice_scatter_copyback",
+    ),
+    pytest.param(
+        "alias_diagonal_scatter_index_put_chain",
+        _live_input_and_output,
+        frozenset({"alias"}),
+        id="alias_diagonal_scatter_index_put_chain",
     ),
 )
 
