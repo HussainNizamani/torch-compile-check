@@ -1,6 +1,5 @@
 # torch-compile-check
 
-*(formerly `compile-check`)*
 
 [![CI](https://github.com/HussainNizamani/torch-compile-check/actions/workflows/ci.yml/badge.svg)](https://github.com/HussainNizamani/torch-compile-check/actions/workflows/ci.yml)
 [![Action self-test](https://github.com/HussainNizamani/torch-compile-check/actions/workflows/action-selftest.yml/badge.svg)](https://github.com/HussainNizamani/torch-compile-check/actions/workflows/action-selftest.yml)
@@ -198,8 +197,9 @@ mitigation for numerics: a third, float64 eager reference that separates
 It narrows imprecision. It does not detect a genuine eager correctness
 bug.
 
-v0.1 runs static shapes only (`dynamic=False`, recorded in the JSON as
-`run.dynamic`); a dynamic-shapes lane is planned.
+By default v0.1 runs static shapes (`dynamic=False`, recorded in the JSON as
+`run.dynamic`); `--dynamic` adds a single dynamic-shapes pass, and a full
+dynamic-shapes matrix is planned.
 
 ## Relationship to PyTorch's built-in tools
 
