@@ -421,6 +421,19 @@ merge order.
 
 ### Fixed
 
+- sdist contents pinned. `python -m build` (hatchling) bundled every
+  untracked, non-gitignored file sitting in the working tree at build time
+  into `dist/*.tar.gz` along with the source -- a stray `results/`, `dp.json`
+  or `rc.md` left over from a hand run on the box that built it, found on
+  the aarch64 release-candidate leg. `[tool.hatch.build.targets.sdist]`
+  now lists exactly what a release needs -- source, tests, the corpus, the
+  validation suite, docs, the Action, the CI workflows, and the top-level
+  project files -- so the sdist is reproducible from a clean clone
+  regardless of what else is lying around the checkout. Reproduced by
+  dropping three untracked files into the tree and confirming they are
+  absent from the rebuilt sdist while `LICENSE`, `README.md`,
+  `pyproject.toml`, `src/`, `tests/` and `docs/` are present; `twine check`
+  stays clean on both the wheel and the sdist.
 - `cases.summary` no longer caches a crashed corpus observation. An entry whose
   verdict is `UNKNOWN` -- the script exited 2, timed out, or could not be
   placed -- is never written to the observation cache, and an `UNKNOWN` entry

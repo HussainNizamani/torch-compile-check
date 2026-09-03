@@ -339,6 +339,15 @@ reads as "torch-compile-check is broken" rather than "this environment cannot
 build the target". `hf_tiny_bert.py`'s own docstring has the detail on
 what importing it directly looks like without `transformers` installed.
 
+Point `torch-compile-check` at `validation/targets/hf_tiny_bert.py` directly,
+outside of `validation/run.py`, in an environment without `transformers`,
+and the CLI itself has no suite to fall back on: it exits `2` with
+`torch-compile-check: importing hf_tiny_bert.py raised
+ModuleNotFoundError: No module named 'transformers'`, a tool error rather
+than a skip, because there is nothing to compare without a successful
+import (`docs/usage.md`). `pip install "torch-compile-check[validation]"`
+installs what every target in this table needs.
+
 ## Provenance
 
 Run on {run_date}. torch `{env["torch_version"]}` (git `{env["torch_git"]}`),

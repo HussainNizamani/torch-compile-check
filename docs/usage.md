@@ -16,6 +16,16 @@ a module-level `model` or `fn`, and a module-level `inputs` or `get_inputs()`.
 Exit codes: `0` clean, `1` a `--fail-on` finding (or a compiled lane that
 raised while eager did not), `2` a tool error.
 
+A target whose import raises -- including a missing optional dependency,
+such as `transformers` for a target like `validation/targets/hf_tiny_bert.py`
+-- is a tool error, exit `2`: `torch-compile-check: importing
+hf_tiny_bert.py raised ModuleNotFoundError: No module named 'transformers'`,
+because there is nothing to compare without a successful import.
+`validation/run.py` runs a whole suite of targets and reports that one as
+"skipped" instead (`docs/validation.md` "Extras"), so one missing extra
+does not abort the rest; `pip install "torch-compile-check[validation]"`
+installs what those targets need.
+
 ## `--version`, `--probe`
 
 ```console
