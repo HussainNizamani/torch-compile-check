@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **nightly-hunt-2026-09-03**: documentation of a CUDA-nightly regression
+  hunt on torch `2.15.0.dev20260829+cu126` with no new upstream bugs found.
+  New "Nightly hunt (2026-09-03)" section in `docs/cross-arch.md` records
+  the lanes (baseline, fp16/bf16 numerics, training step fp32, view/in-place
+  alias oracle, dynamic shapes probe) and outcomes. `docs/validation.md`
+  gains a note that fp16 and bf16 are not validated precisions in v0.1.
+  `PLAN.md` v0.2 outlook expanded with precision handling improvements and
+  Ampere GPU requirements.
+
 ### Changed
 
 - **path-hygiene**: `target.file` -- in the JSON report, the Markdown draft,
