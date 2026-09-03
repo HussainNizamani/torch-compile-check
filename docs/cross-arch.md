@@ -247,7 +247,21 @@ findings: 0 on each side, identical set -- parity holds
 
 All six targets read `parity holds` this way across the aarch64 reference
 and the ProBook x86_64 set (2026-09-03; recorded per leg in
-`docs/validation.md`). The second run below is two *different* targets on
+`docs/validation.md`). The second is the CUDA leg -- the aarch64 reference
+against the Omen's CUDA run of the same target -- so
+`environment.cuda_available` reads `False` vs `True`, is printed, and is
+not gated, same as `environment.machine` above:
+
+```console
+$ python diff_parity.py validation/results/per-target/aarch64-2.14.0+cpu/train_step_mlp.json validation/results/per-target/x86_64-2.14.0+cu126-cuda/train_step_mlp.json
+environment.machine: 'aarch64' vs 'x86_64' (DIFFERENT)
+environment.cuda_available: False vs True (DIFFERENT)
+findings: 0 on each side, identical set -- parity holds
+```
+
+All 12 Omen pairs (6 targets x CPU and CUDA) read `parity holds` the same
+way against the aarch64 reference (recorded per leg in
+`docs/validation.md`). The next run below is two *different* targets on
 one machine, kept only to prove the "NOT parity" branch fires on a real
 mismatch rather than being untested code:
 

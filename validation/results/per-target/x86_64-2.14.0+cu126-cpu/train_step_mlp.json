@@ -1,0 +1,171 @@
+{
+  "schema_version": 2,
+  "tool": {
+    "name": "compile-check",
+    "version": "0.1.0"
+  },
+  "target": {
+    "name": "train_step_mlp:model",
+    "file": "/home/hussainnizamani/torch-compile-check/validation/targets/train_step_mlp.py",
+    "entry": "model",
+    "inputs": "get_inputs"
+  },
+  "environment": {
+    "torch_version": "2.14.0+cu126",
+    "torch_git_version": "08187d9e0fba026dc8217405802ab5381dc88d90",
+    "python_version": "3.12.13",
+    "platform": "Linux-7.1.5-200.fc44.x86_64-x86_64-with-glibc2.43",
+    "machine": "x86_64",
+    "cpu_flags": "avx2 f16c fma",
+    "cuda_available": true,
+    "inductor_force_disable_caches": true
+  },
+  "run": {
+    "device": "cpu",
+    "seed": 0,
+    "backends": [
+      "eager",
+      "aot_eager",
+      "inductor"
+    ],
+    "fullgraph": false,
+    "dynamic": false,
+    "grad": true,
+    "fp64": true,
+    "module": "deep copied per lane",
+    "share_module": false,
+    "target_is_module": true,
+    "module_copy_error": null,
+    "fail_on": [
+      "numerics",
+      "alias",
+      "metadata",
+      "grad"
+    ],
+    "grad_tol_factor": 10.0,
+    "rtol": null,
+    "atol": null,
+    "baseline": null
+  },
+  "backends": [
+    {
+      "backend": "eager",
+      "reference": false,
+      "ok": true,
+      "outputs": 1,
+      "first_call_s": 0.0003,
+      "second_call_s": 0.0001,
+      "exception": null,
+      "second_call_exception": null,
+      "grad_ran": true,
+      "grad_error": null,
+      "graph": null
+    },
+    {
+      "backend": "aot_eager",
+      "reference": false,
+      "ok": true,
+      "outputs": 1,
+      "first_call_s": 0.4216,
+      "second_call_s": 0.0003,
+      "exception": null,
+      "second_call_exception": null,
+      "grad_ran": true,
+      "grad_error": null,
+      "graph": {
+        "measured": true,
+        "graph_count": 1,
+        "break_count": 0,
+        "breaks": [],
+        "op_count": 4,
+        "compile_times": "TorchDynamo compilation metrics:\nFunction, Runtimes (s)\n_compile.compile_inner, 0.0774\ncompile_attempt_0, 0.0519\nbytecode_tracing, 0.0465\nget_fake_value, 0.0300\ncreate_proxy, 0.0018\nwrap_to_fake_tensor_and_record, 0.0044\nvariable_builder_call, 0.0100\ninsert_deferred_runtime_asserts, 0.0009\nOutputGraph.call_user_compiler, 0.0001\nbuild_guards, 0.0243\ngc, 0.0006",
+        "recompiles": 0,
+        "unique_graphs_before": 1,
+        "unique_graphs_after": 1,
+        "explain_error": null
+      }
+    },
+    {
+      "backend": "inductor",
+      "reference": false,
+      "ok": true,
+      "outputs": 1,
+      "first_call_s": 5.4009,
+      "second_call_s": 0.0003,
+      "exception": null,
+      "second_call_exception": null,
+      "grad_ran": true,
+      "grad_error": null,
+      "graph": {
+        "measured": true,
+        "graph_count": 1,
+        "break_count": 0,
+        "breaks": [],
+        "op_count": 4,
+        "compile_times": "TorchDynamo compilation metrics:\nFunction, Runtimes (s)\n_compile.compile_inner, 0.0805\ncompile_attempt_0, 0.0550\nbytecode_tracing, 0.0493\nget_fake_value, 0.0326\ncreate_proxy, 0.0016\nwrap_to_fake_tensor_and_record, 0.0045\nvariable_builder_call, 0.0104\ninsert_deferred_runtime_asserts, 0.0009\nOutputGraph.call_user_compiler, 0.0001\nbuild_guards, 0.0246\ngc, 0.0002",
+        "recompiles": 0,
+        "unique_graphs_before": 3,
+        "unique_graphs_after": 3,
+        "explain_error": null
+      }
+    },
+    {
+      "backend": "eager_fp64",
+      "reference": true,
+      "ok": true,
+      "outputs": 1,
+      "first_call_s": 0.0014,
+      "second_call_s": 0.0001,
+      "exception": null,
+      "second_call_exception": null,
+      "grad_ran": false,
+      "grad_error": null,
+      "graph": null
+    }
+  ],
+  "findings": [],
+  "verdict": {
+    "stage": "clean",
+    "first_divergent_backend": null,
+    "summary": "clean: no backend diverged from eager across 2 lanes",
+    "note": null,
+    "clean": true,
+    "compared": true,
+    "backends": [
+      {
+        "backend": "eager",
+        "fail": 0,
+        "warn": 0,
+        "info": 0,
+        "graph_fail": 0,
+        "raised": null,
+        "raised_on_repeat": null
+      },
+      {
+        "backend": "aot_eager",
+        "fail": 0,
+        "warn": 0,
+        "info": 0,
+        "graph_fail": 0,
+        "raised": null,
+        "raised_on_repeat": null
+      },
+      {
+        "backend": "inductor",
+        "fail": 0,
+        "warn": 0,
+        "info": 0,
+        "graph_fail": 0,
+        "raised": null,
+        "raised_on_repeat": null
+      }
+    ]
+  },
+  "minimized": null,
+  "counts": {
+    "fail": 0,
+    "warn": 0,
+    "info": 0
+  },
+  "exit_code": 0
+}

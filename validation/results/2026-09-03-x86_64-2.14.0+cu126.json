@@ -1,0 +1,66 @@
+{
+  "date": "2026-09-03",
+  "environment": {
+    "torch_version": "2.14.0+cu126",
+    "torch_git": "08187d9e0fba",
+    "python_version": "3.12.13",
+    "machine": "x86_64",
+    "platform": "Linux-7.1.5-200.fc44.x86_64-x86_64-with-glibc2.43"
+  },
+  "results": [
+    {
+      "name": "tv_resnet18",
+      "status": "clean",
+      "exit_code": 0,
+      "findings_by_oracle": {},
+      "stage": "clean: no backend diverged from eager across 2 lanes",
+      "seconds": 24.508245259999967,
+      "reason": null
+    },
+    {
+      "name": "tv_mobilenet_v3_small",
+      "status": "clean",
+      "exit_code": 0,
+      "findings_by_oracle": {},
+      "stage": "clean: no backend diverged from eager across 2 lanes",
+      "seconds": 42.72492217800027,
+      "reason": null
+    },
+    {
+      "name": "tv_efficientnet_b0",
+      "status": "clean",
+      "exit_code": 0,
+      "findings_by_oracle": {},
+      "stage": "clean: no backend diverged from eager across 2 lanes",
+      "seconds": 52.73969274000001,
+      "reason": null
+    },
+    {
+      "name": "tv_vit_b_16_tiny",
+      "status": "clean",
+      "exit_code": 0,
+      "findings_by_oracle": {},
+      "stage": "clean: no backend diverged from eager across 2 lanes",
+      "seconds": 14.817783300999963,
+      "reason": null
+    },
+    {
+      "name": "hf_tiny_bert",
+      "status": "clean",
+      "exit_code": 0,
+      "findings_by_oracle": {},
+      "stage": "clean: no backend diverged from eager across 2 lanes",
+      "seconds": 16.644662310000058,
+      "reason": null
+    },
+    {
+      "name": "train_step_mlp",
+      "status": "clean",
+      "exit_code": 0,
+      "findings_by_oracle": {},
+      "stage": "clean: no backend diverged from eager across 2 lanes",
+      "seconds": 10.701964063000105,
+      "reason": null
+    }
+  ]
+}
