@@ -378,6 +378,20 @@ own numbering for the rest), in merge order.
 
 ### Fixed
 
+- `cases.summary` no longer caches a crashed corpus observation. An entry whose
+  verdict is `UNKNOWN` -- the script exited 2, timed out, or could not be
+  placed -- is never written to the observation cache, and an `UNKNOWN` entry
+  an older cache file already holds is read back as a miss rather than reused.
+  On a box whose environment was broken (missing Python headers made every
+  case's inductor compile fail, exit 2), the cache used to keep answering
+  `UNKNOWN` for every case after the box was fixed, since nothing about the
+  cases' own source had changed -- a crash is environment state, not a
+  verdict, and `TORCH_COMPILE_CHECK_OBSERVATIONS=` never covered it because
+  the stale entries were sitting under the *default* cache path, not a path
+  anyone had overridden. `python -m cases.summary` also takes a `--no-cache`
+  flag now (equivalent to `TORCH_COMPILE_CHECK_OBSERVATIONS=`), and the tally
+  line always says how many observations were reused versus freshly run,
+  including zero (M4-6).
 - The Action's "Run compile-check" step no longer dies on the first target it
   cannot run. Its stage-parsing pipeline ran under `set -e`, and `grep` finding
   neither "first diverges at" nor "clean:" -- which is every tool error: a
