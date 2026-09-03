@@ -4,7 +4,9 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] → 0.1.0
+## [Unreleased]
+
+## [0.1.0] - 2026-09-03
 
 This project was named `compile-check` through M4-3; the `### Changed` entry
 below is the M4-5 rename to `torch-compile-check`. Everything else in this
@@ -12,11 +14,12 @@ section is written under whichever name was current at the time it landed,
 which is `compile-check` for every slice before M4-5.
 
 Everything below is what ships as `0.1.0` — PLAN.md "M4"'s definition of
-done for this milestone — once it is tagged; the tag, the PyPI upload, and
-the Marketplace listing are a maintainer's own release step, not something
-this file claims has already happened. Every entry is grouped by the slice
-it landed in (PLAN.md's milestone schedule for the `M*` slices, the office's
-own numbering for the rest), in merge order.
+done for this milestone. The tag, the PyPI upload, the public flip, and the
+Marketplace listing are a maintainer's own release step, run from
+`docs/release.md`, and this file does not claim any of them has happened
+yet. Every entry is grouped by the slice it landed in (PLAN.md's milestone
+schedule for the `M*` slices, the office's own numbering for the rest), in
+merge order.
 
 ### Added
 
@@ -355,6 +358,46 @@ own numbering for the rest), in merge order.
   currently meet. `action/run.sh`: the "Run compile-check" step moved out of
   `action.yml` into a file that `tests/test_action_run.py` executes, the same
   split `summary.sh` already had.
+- **M4-4** (PR #19): the release workflow that never holds a token.
+  `.github/workflows/publish.yml`: on a `v*` tag push (or `workflow_dispatch`
+  for a dry-run build), `python -m build` and `twine check dist/*`, then
+  TestPyPI and PyPI uploads through PyPI's Trusted Publishing (OIDC) behind
+  the `testpypi` and `pypi` GitHub environments -- no API token lives in a
+  secret, on disk, or in shell history, and each environment's required
+  reviewers gate the corresponding upload before it runs. `docs/release.md`
+  gains step 5b: the one-time pending-publisher registration on PyPI and
+  TestPyPI (works from a private repository -- GitHub's OIDC token carries
+  owner/repository/workflow/environment claims, which is what PyPI checks,
+  not the repository's visibility) and the GitHub environment reviewer
+  setup, plus the account-scoped-token note in step 5 for whichever upload
+  has to happen before the project exists on PyPI to scope a token to it.
+- **V-1** (PR #21): the aarch64 baseline for cross-architecture parity. Six
+  per-target `torch-compile-check --json` outputs (schema 2, torch
+  `2.14.0+cpu` git `08187d9e0fba`, Python 3.10.12, aarch64), committed under
+  `validation/results/per-target/aarch64-2.14.0+cpu/`, all exit 0 with zero
+  findings -- the reference set every other architecture's per-target run is
+  diffed against by `diff_parity.py` (`docs/cross-arch.md`).
+- **V-2** (PR #23): the first cross-architecture parity result. ProBook
+  x86_64 CPU per-target JSONs (torch `2.14.0+cpu`, `compile-check 0.1.0` @
+  `4caf42c`, pre-rename) under
+  `validation/results/per-target/x86_64-2.14.0+cpu/`, plus the `run.py`
+  summary -- all six hold parity against the committed aarch64 reference
+  (`diff_parity.py`, 6/6). `docs/validation.md` gains the cross-architecture
+  table, one row per leg; `docs/cross-arch.md` replaces its
+  same-architecture placeholder demo with the real aarch64-versus-x86_64
+  transcript.
+- **V-3** (PR #24): the CUDA leg, and the last of the three. Twelve
+  per-target JSONs from the Omen (GTX 1660 Ti, `sm_75`, torch
+  `2.14.0+cu126` git `08187d9e0fba`, Python 3.12.13), six run on CPU and six
+  on CUDA, under `validation/results/per-target/x86_64-2.14.0+cu126-cpu/`
+  and `.../x86_64-2.14.0+cu126-cuda/`, plus the `run.py` summary -- all
+  twelve hold parity against the aarch64 reference by the same
+  `diff_parity.py`. Cross-architecture validation now stands at 18/18: the
+  aarch64 reference held against x86_64 CPU, x86_64+cu126 CPU, and
+  x86_64+cu126 CUDA (`sm_75`), six targets on each leg.
+  `docs/validation.md` points its rows at the committed files and notes the
+  `--fp64-oracle` difference on this leg; `docs/cross-arch.md` gains the
+  real CUDA-versus-aarch64 transcript.
 
 ### Changed
 
@@ -378,6 +421,19 @@ own numbering for the rest), in merge order.
 
 ### Fixed
 
+- sdist contents pinned. `python -m build` (hatchling) bundled every
+  untracked, non-gitignored file sitting in the working tree at build time
+  into `dist/*.tar.gz` along with the source -- a stray `results/`, `dp.json`
+  or `rc.md` left over from a hand run on the box that built it, found on
+  the aarch64 release-candidate leg. `[tool.hatch.build.targets.sdist]`
+  now lists exactly what a release needs -- source, tests, the corpus, the
+  validation suite, docs, the Action, the CI workflows, and the top-level
+  project files -- so the sdist is reproducible from a clean clone
+  regardless of what else is lying around the checkout. Reproduced by
+  dropping three untracked files into the tree and confirming they are
+  absent from the rebuilt sdist while `LICENSE`, `README.md`,
+  `pyproject.toml`, `src/`, `tests/` and `docs/` are present; `twine check`
+  stays clean on both the wheel and the sdist.
 - `cases.summary` no longer caches a crashed corpus observation. An entry whose
   verdict is `UNKNOWN` -- the script exited 2, timed out, or could not be
   placed -- is never written to the observation cache, and an `UNKNOWN` entry
@@ -468,4 +524,5 @@ own numbering for the rest), in merge order.
   call, so a gradient and an output are compared by the same code and the
   same tolerances (M2-2).
 
-[Unreleased]: https://github.com/HussainNizamani/torch-compile-check/commits/main
+[Unreleased]: https://github.com/HussainNizamani/torch-compile-check/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/HussainNizamani/torch-compile-check/releases/tag/v0.1.0

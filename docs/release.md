@@ -216,10 +216,8 @@ different project registries, so this whole flow runs twice:
 2. Account → Publishing → "Add a new pending publisher".
 3. Fill in:
    - **PyPI project name**: `torch-compile-check` — the name `pyproject.toml`'s
-     `name =` field carries once the m4-5-rename slice merges. If a release
-     ever has to happen before that lands, register whatever `name =` says at
-     the time instead; the registered project name and the built package's
-     name have to match exactly, or the upload job fails.
+     `name =` field carries; the registered project name and the built
+     package's name have to match exactly, or the upload job fails.
    - **Owner**: `HussainNizamani`
    - **Repository name**: `torch-compile-check`
    - **Workflow name**: `publish.yml`
