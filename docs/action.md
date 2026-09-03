@@ -1,13 +1,13 @@
-# Using compile-check as a GitHub Action
+# Using torch-compile-check as a GitHub Action
 
 A composite action published from [`action/`](../action/action.yml) in this
-repository. It installs `compile-check`, runs it against the entrypoints you
+repository. It installs `torch-compile-check`, runs it against the entrypoints you
 declare, fails the job on the configured `--fail-on` categories, and writes a
 job summary with one row per target.
 
 > **Status:** the CLI's main run path landed in M1-3
-> ([PR #6](https://github.com/HussainNizamani/compile-check/pull/6); see
-> [PLAN.md](../PLAN.md)). `compile-check <target>` on `main` runs for real:
+> ([PR #6](https://github.com/HussainNizamani/torch-compile-check/pull/6); see
+> [PLAN.md](../PLAN.md)). `torch-compile-check <target>` on `main` runs for real:
 > exit 0 clean, 1 on a `--fail-on` finding, 2 on a tool error. Only a `ref`
 > pinned to a commit before M1-3 still exits 2 with "not implemented" for
 > every real target; the `allow-unimplemented` input exists for that case
@@ -16,7 +16,7 @@ job summary with one row per target.
 ## Usage
 
 ```yaml
-name: compile-check
+name: torch-compile-check
 
 on:
   push:
@@ -34,28 +34,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: HussainNizamani/compile-check/action@main
-        id: compile-check
+      - uses: HussainNizamani/torch-compile-check/action@main
+        id: torch-compile-check
         with:
           targets: |
             models/classifier.py
             models/encoder.py:build_model:build_inputs
           torch: ${{ matrix.torch }}
-          baseline: .compile-check/baseline.json
+          baseline: .torch-compile-check/baseline.json
 
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: compile-check-results-${{ matrix.torch }}
-          path: ${{ steps.compile-check.outputs.json-path }}*
+          name: torch-compile-check-results-${{ matrix.torch }}
+          path: ${{ steps.torch-compile-check.outputs.json-path }}*
 ```
 
 Pin `ref` (not `@main`) once the action stabilizes if your repository wants a
 fixed version:
 
 ```yaml
-- uses: HussainNizamani/compile-check/action@main
+- uses: HussainNizamani/torch-compile-check/action@main
   with:
     ref: v0.1.0
     targets: models/classifier.py
@@ -65,7 +65,7 @@ fixed version:
 
 | Input | Default | Description |
 |---|---|---|
-| `targets` | *(required)* | Newline-separated list of `path[:entry][:inputs]` targets, one compile-check run per line. See PLAN.md "Discovery convention" for the `path`/`entry`/`inputs` grammar. |
+| `targets` | *(required)* | Newline-separated list of `path[:entry][:inputs]` targets, one torch-compile-check run per line. See PLAN.md "Discovery convention" for the `path`/`entry`/`inputs` grammar. |
 | `backends` | `eager,aot_eager,inductor` | Comma-separated backends, forwarded to `--backends`. |
 | `fail-on` | `numerics,alias,metadata,grad` | Comma-separated oracle categories that fail the job, forwarded to `--fail-on`. The correctness categories are on by default; `graph` is informational unless you ask for it (see `baseline` below). |
 | `torch` | `stable` | `stable` (PyPI), `nightly` (CPU nightly index), or an explicit pip spec such as `torch==2.5.0`. |
@@ -75,10 +75,10 @@ fixed version:
 | `minimize` | `false` | Exactly `"true"` or `"false"`. `"true"` passes `--minimize`, so a finding is shrunk — leading input dimension halved, child modules replaced with a passthrough — before it is reported. Costs one re-run of two lanes per candidate, which is what `budget` bounds. |
 | `budget` | *(unset)* | Wall-clock ceiling in seconds for the minimizer, forwarded to `--budget`. It bounds `minimize` only; see [Runtime budget](#runtime-budget). |
 | `cache` | `false` | Exactly `"true"` or `"false"`. `"true"` lets the run reuse compiled artifacts: torch's compile caches stay on (via the CLI's `--allow-caches`) and pip's wheel cache is restored and saved with `actions/cache`. The default is what makes a run measure the current compiler — see [Compile caches](#compile-caches). |
-| `json-out` | `compile-check-results.json` | Base path for the JSON results. With more than one target, each run writes its own file suffixed `.<n>.json` next to this base (`compile-check-results.1.json`, `.2.json`, ...), since one CLI invocation produces one JSON document per PLAN.md "Reports". |
+| `json-out` | `torch-compile-check-results.json` | Base path for the JSON results. With more than one target, each run writes its own file suffixed `.<n>.json` next to this base (`torch-compile-check-results.1.json`, `.2.json`, ...), since one CLI invocation produces one JSON document per PLAN.md "Reports". |
 | `extra-args` | *(unset)* | Extra arguments appended verbatim to every invocation, for flags this action does not wrap directly (`--rtol`, `--seed`, `--fullgraph`, ...). |
-| `ref` | `main` | Git ref of `HussainNizamani/compile-check` to install from, until the package ships on PyPI. |
-| `source` | `auto` | Where to install compile-check from. `auto` installs from the checked-out source when the action runs inside this repo (its parent directory declares `compile-check` in `pyproject.toml`), else falls back to `git`. `local` forces the checked-out-source install. `git` forces `pip install git+https://.../compile-check@ref` — the only option that works for external consumers, since pip cannot clone a private repo without credentials. |
+| `ref` | `main` | Git ref of `HussainNizamani/torch-compile-check` to install from, until the package ships on PyPI. |
+| `source` | `auto` | Where to install torch-compile-check from. `auto` installs from the checked-out source when the action runs inside this repo (its parent directory declares `torch-compile-check` in `pyproject.toml`), else falls back to `git`. `local` forces the checked-out-source install. `git` forces `pip install git+https://.../torch-compile-check@ref` — the only option that works for external consumers, since pip cannot clone a private repo without credentials. |
 | `allow-unimplemented` | `false` | Exactly `"true"` or `"false"`. See "Degrading honestly" below. |
 
 ## Outputs
@@ -107,21 +107,21 @@ one-off job (`workflow_dispatch` is the usual trigger) whose only purpose is to
 produce the file, which you then download and commit:
 
 ```yaml
-- uses: HussainNizamani/compile-check/action@main
+- uses: HussainNizamani/torch-compile-check/action@main
   with:
     targets: models/classifier.py
-    write-baseline: .compile-check/baseline.json
+    write-baseline: .torch-compile-check/baseline.json
 - uses: actions/upload-artifact@v4
   with:
     name: baseline
-    path: .compile-check/baseline.json
+    path: .torch-compile-check/baseline.json
 ```
 
 By hand, the same thing:
 
 ```console
-$ compile-check models/classifier.py --write-baseline .compile-check/baseline.json
-$ cat .compile-check/baseline.json
+$ torch-compile-check models/classifier.py --write-baseline .torch-compile-check/baseline.json
+$ cat .torch-compile-check/baseline.json
 {
   "inductor": {
     "break_reasons": [
@@ -249,8 +249,8 @@ caller with `continue-on-error: true` reads them to decide what to do next.
 ## Degrading honestly on a pre-M1-3 `ref`
 
 The CLI's main run path (oracles, localization, the terminal/JSON/Markdown
-reports) landed in M1-3 ([PR #6](https://github.com/HussainNizamani/compile-check/pull/6))
-and is on `main` today: `compile-check <target>` runs for real, exit 0/1/2
+reports) landed in M1-3 ([PR #6](https://github.com/HussainNizamani/torch-compile-check/pull/6))
+and is on `main` today: `torch-compile-check <target>` runs for real, exit 0/1/2
 on its own terms. Only a `ref` pinned to a commit before that PR still
 exits `2` with a fixed "not implemented" message for anything other than
 `--version`, `--probe`, and the hidden `--run-only` developer path. This
@@ -304,6 +304,6 @@ private repository without credentials, and the action does not supply one.
 That job runs with `continue-on-error: true` so the gap shows up as a red job
 with a stated reason in the job list, rather than as a green `selftest` job
 that never actually ran the install path a real external user depends on.
-Once the repository is public, or `compile-check` ships on PyPI and `source:
+Once the repository is public, or `torch-compile-check` ships on PyPI and `source:
 auto` resolves external consumers there instead, `selftest-git-source` is
 expected to turn green with no other change.

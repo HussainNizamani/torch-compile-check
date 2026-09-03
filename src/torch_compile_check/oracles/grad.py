@@ -20,19 +20,19 @@ Three rules, stated once so they are not re-derived from the code:
 * the presence set. A tensor that ended up with a gradient in one world and not
   in the other is a divergence whatever the gradients that did arrive say, and
   the finding names the parameter.
-* the values, through :func:`compile_check.oracles.numerics.compare_tensors`, so
+* the values, through :func:`torch_compile_check.oracles.numerics.compare_tensors`, so
   a gradient is compared by the same rule an output is: the same per-dtype
   tolerances, the same ``--rtol`` and ``--atol`` overrides, and then one
   deliberate loosening. Both tolerances are multiplied by
   ``cfg.grad_tol_factor``
-  (:data:`~compile_check.oracles.base.DEFAULT_GRAD_TOL_FACTOR`, ``10``, settable
+  (:data:`~torch_compile_check.oracles.base.DEFAULT_GRAD_TOL_FACTOR`, ``10``, settable
   with ``--grad-tol-factor``), because a gradient is a sum over every path that
   reaches a tensor and compilation is free to fuse and reassociate that sum. The
   M2-2 verification measured the boundary of it: a compiled resnet18 backward
   sat about 1.24e-5 from eager's against a float32 atol of 1e-5, close enough
   that the same run came back clean or failing depending on the last bit. Ten
   clears that and does not clear every model -- see
-  :data:`~compile_check.oracles.base.DEFAULT_GRAD_TOL_FACTOR` for what a whole
+  :data:`~torch_compile_check.oracles.base.DEFAULT_GRAD_TOL_FACTOR` for what a whole
   resnet18 backward actually needs, which is why the number is a flag. The
   output tolerances are untouched -- the reason for the looser rule is the
   backward's accumulation and nothing else, and lending it to the forward
@@ -52,13 +52,13 @@ import importlib
 import logging
 from typing import Any
 
-from compile_check.oracles.base import Finding, OracleConfig, Severity
-from compile_check.oracles.numerics import compare_tensors
-from compile_check.results import BackendResult, CapturedException
+from torch_compile_check.oracles.base import Finding, OracleConfig, Severity
+from torch_compile_check.oracles.numerics import compare_tensors
+from torch_compile_check.results import BackendResult, CapturedException
 
 __all__ = ["GradOracle"]
 
-log = logging.getLogger("compile_check")
+log = logging.getLogger("torch_compile_check")
 
 
 class GradOracle:

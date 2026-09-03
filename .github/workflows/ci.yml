@@ -50,12 +50,12 @@ jobs:
           python -m pip install --pre torch \
             --index-url https://download.pytorch.org/whl/nightly/cpu
 
-      - name: Install compile-check
+      - name: Install torch-compile-check
         run: python -m pip install -e ".[dev]"
 
       - name: Record the environment
         run: |
-          python -c "import json; from compile_check.env import collect_environment; \
+          python -c "import json; from torch_compile_check.env import collect_environment; \
             print(json.dumps(collect_environment(), indent=2))"
 
       - name: Lint
@@ -92,10 +92,10 @@ jobs:
       # on are checked on every cell of the matrix, so a nightly that moves one
       # of them shows up here rather than in a user's run.
       - name: Probe the torch API surface
-        run: compile-check --probe
+        run: torch-compile-check --probe
 
       # The console script end to end on every cell, not only the library: the
       # tool's own claim is "one command", and a packaging or entry-point break
       # would pass every test above.
       - name: Run the tool on the reference fixture
-        run: compile-check tests/fixtures/mlp.py
+        run: torch-compile-check tests/fixtures/mlp.py

@@ -1,7 +1,7 @@
 """Every corpus case, through the real runner and the real oracles, once.
 
 PLAN.md "Regression corpus" states the contract this module checks: import a
-case, ``build()`` it, run it through :mod:`compile_check.runner` and every
+case, ``build()`` it, run it through :mod:`torch_compile_check.runner` and every
 oracle, and ask the case's own ``check()`` what it thinks. If ``check()`` says
 RED the tool must report at least one fail finding from the oracle the case
 belongs to; if it says GREEN the tool must report none. The case is the ground
@@ -20,7 +20,7 @@ whole cost of covering it.
 Three neighbours, and what is deliberately not repeated from them:
 
 * ``tests/test_corpus_twins.py`` runs each standalone script beside its
-  discovery-convention twin through ``compile-check``'s own ``main()`` and
+  discovery-convention twin through ``torch-compile-check``'s own ``main()`` and
   asserts the exit code and the stage line agree. That is the CLI's contract and
   this module does not restate it; what it takes from there is
   :data:`~tests.test_corpus_twins.TWINS`, so the flags a case needs and the
@@ -48,12 +48,12 @@ import pytest
 import torch
 
 from cases.markers import MARKERS
-from compile_check.discover import Target, import_target_module, load_target
-from compile_check.localize import localize
-from compile_check.oracles import Finding, OracleConfig, run_oracles
-from compile_check.results import BackendResult, CapturedException
-from compile_check.runner import run_all
 from test_corpus_twins import TWINS
+from torch_compile_check.discover import Target, import_target_module, load_target
+from torch_compile_check.localize import localize
+from torch_compile_check.oracles import Finding, OracleConfig, run_oracles
+from torch_compile_check.results import BackendResult, CapturedException
+from torch_compile_check.runner import run_all
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CASES = REPO_ROOT / "cases"
@@ -109,7 +109,7 @@ def _raised_or_returned(eager: BackendResult, lane: BackendResult) -> tuple[Any,
 
     That case's RED is "the compiled lane raised where eager succeeded", so its
     ``check()`` takes the attempt rather than a value. The runner records an
-    exception as a :class:`~compile_check.results.CapturedException` -- data,
+    exception as a :class:`~torch_compile_check.results.CapturedException` -- data,
     with no traceback object and no live exception -- and ``check()`` reads
     ``type(payload).__name__`` and ``str(payload)`` off an exception, so the
     recorded type and message are rebuilt into one. A reconstruction, and said
@@ -258,7 +258,7 @@ def test_a_corpus_case_reports_exactly_when_its_own_check_says_red(
         if not is_red:
             assert fails == [], (
                 f"{case}'s own check() calls {lane.backend} clean ({message}) and "
-                f"compile-check reported {[f.message for f in fails]}"
+                f"torch-compile-check reported {[f.message for f in fails]}"
             )
         elif reports_as is None:
             # The raised-lane RED: nothing to compare, so no *correctness*
@@ -275,7 +275,7 @@ def test_a_corpus_case_reports_exactly_when_its_own_check_says_red(
             assert {f.oracle for f in fails} <= {"graph"}, [f.message for f in fails]
         else:
             assert {finding.oracle for finding in fails} == reports_as, (
-                f"{case} is RED on {lane.backend} ({message}) and compile-check "
+                f"{case} is RED on {lane.backend} ({message}) and torch-compile-check "
                 f"reported {[(f.oracle, f.message) for f in fails]}"
             )
             assert {finding.backend for finding in fails} == {lane.backend}

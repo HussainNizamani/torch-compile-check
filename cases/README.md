@@ -15,9 +15,9 @@ Two shapes of file live here, and the difference is deliberate.
   `RED`/`GREEN` line with the torch version and build hash it measured, and
   exits non-zero when the bug reproduces. `FINDINGS.md` is the ground truth
   table they fill in.
-- **compile-check targets**, following the discovery convention of PLAN.md: a
+- **torch-compile-check targets**, following the discovery convention of PLAN.md: a
   module-level `model` or `fn` plus `inputs` or `get_inputs()`, and nothing
-  else, so `compile-check cases/<file>.py` runs the case through the tool
+  else, so `torch-compile-check cases/<file>.py` runs the case through the tool
   itself. `dtype_promotion.py` is the discovery-convention twin of
   `dtype_int8_matmul_promotion.py`, `alias_copyback.py` the twin of
   `alias_slice_scatter_copyback.py`, `alias_noop_view.py` the twin of
@@ -58,7 +58,7 @@ version marker -- the torch build, git hash, and architecture the RED or
 GREEN verdict was measured on, since a case can flip between them purely
 because of which torch it runs against. Then write the discovery-convention
 twin: the same reproducer, trimmed to a module-level `fn` (or `model`) plus
-`inputs`, with nothing else at module scope, so `compile-check
+`inputs`, with nothing else at module scope, so `torch-compile-check
 cases/<twin>.py` exercises it through the real tool rather than the
 standalone script's own comparison. Add the pair to
 `tests/test_corpus_twins.py`'s parametrize list, naming the backend the

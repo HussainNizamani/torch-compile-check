@@ -1,4 +1,4 @@
-"""195451 as a compile-check target: a functional result that comes back as its input.
+"""195451 as a torch-compile-check target: a functional result that comes back as its input.
 
 Issue: https://github.com/pytorch/pytorch/issues/195451 -- inductor's
 ``should_reinplace_scatter()`` treats a ``slice_scatter`` followed by a direct
@@ -13,7 +13,7 @@ Twin file, deliberately, on the pattern of ``cases/dtype_promotion.py`` beside
 is the corpus entry for the same bug: a standalone RED/GREEN script that
 FINDINGS.md keys on, driven by its own ``main()``. This file is the same
 reproducer written to the discovery convention of PLAN.md, a module-level ``fn``
-and ``inputs``, so that ``compile-check cases/alias_copyback.py`` runs it through
+and ``inputs``, so that ``torch-compile-check cases/alias_copyback.py`` runs it through
 the tool itself -- which the corpus script cannot be, since it exposes
 ``build()`` rather than the two module-level names discovery looks for.
 

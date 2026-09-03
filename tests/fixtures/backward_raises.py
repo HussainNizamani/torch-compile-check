@@ -25,7 +25,7 @@ from typing import Any
 import torch
 from torch import nn
 
-BACKEND = "compile_check_backward_raises"
+BACKEND = "torch_compile_check_backward_raises"
 """The backend name to pass to ``--backends``."""
 
 MESSAGE = "this backend's backward raises on purpose"

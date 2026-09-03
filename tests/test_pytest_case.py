@@ -14,11 +14,11 @@ from pathlib import Path
 
 import pytest
 
-from compile_check.localize import localize
-from compile_check.minimize import Minimization, Shrink, Stub
-from compile_check.oracles import Finding
-from compile_check.report.pytest_case import emit, select
-from compile_check.results import BackendResult, CapturedException, RunSet, TargetSource
+from torch_compile_check.localize import localize
+from torch_compile_check.minimize import Minimization, Shrink, Stub
+from torch_compile_check.oracles import Finding
+from torch_compile_check.report.pytest_case import emit, select
+from torch_compile_check.results import BackendResult, CapturedException, RunSet, TargetSource
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CASES = REPO_ROOT / "cases"
@@ -534,7 +534,7 @@ def test_the_stub_lines_open_the_test_method():
     # In the method, because PLAN.md "Regression test emission" makes the method
     # body the part a maintainer lifts into the inductor suite.
     assert body[1].strip() == (
-        "# compile-check replaced 1 child module with a passthrough; it still reproduced."
+        "# torch-compile-check replaced 1 child module with a passthrough; it still reproduced."
     )
     assert body[2].strip() == (
         'setattr(model.get_submodule("net"), "1", torch.nn.Identity())  # was ReLU'

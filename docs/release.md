@@ -21,7 +21,7 @@ which is what brings in `build` and `twine`).
 $ git switch main && git pull --ff-only
 $ git status --porcelain                 # must print nothing
 $ grep '^version' pyproject.toml         # version = "0.1.0"
-$ python -c "import compile_check; print(compile_check.__version__)"   # 0.1.0
+$ python -c "import torch_compile_check; print(torch_compile_check.__version__)"   # 0.1.0
 $ ruff check . && ruff format --check . && mypy src/ && pytest -q
 ```
 
@@ -33,7 +33,7 @@ recent commit. Asking for that commit's own check runs is the version-agnostic
 way — `gh run list --branch` needs a `gh` newer than the 2.4 on this box:
 
 ```console
-$ gh api "repos/HussainNizamani/compile-check/commits/$(git rev-parse HEAD)/check-runs" \
+$ gh api "repos/HussainNizamani/torch-compile-check/commits/$(git rev-parse HEAD)/check-runs" \
     --jq '.check_runs[] | "\(.name): \(.conclusion)"'
 py3.10 / torch stable: success
 py3.10 / torch nightly: success
@@ -54,8 +54,8 @@ $ python -m build
 $ twine check dist/*
 ```
 
-Expect exactly two files, `dist/compile_check-0.1.0.tar.gz` and
-`dist/compile_check-0.1.0-py3-none-any.whl`, and `PASSED` on both.
+Expect exactly two files, `dist/torch_compile_check-0.1.0.tar.gz` and
+`dist/torch_compile_check-0.1.0-py3-none-any.whl`, and `PASSED` on both.
 
 `twine check` validates the metadata and the long description that PyPI will
 render. If it ever complains about the license fields, the fallback is in
@@ -77,11 +77,11 @@ tree.
 ```console
 $ python -m venv /tmp/cc-release && /tmp/cc-release/bin/python -m pip install -q --upgrade pip
 $ /tmp/cc-release/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
-$ /tmp/cc-release/bin/pip install dist/compile_check-0.1.0-py3-none-any.whl
-$ /tmp/cc-release/bin/compile-check --version          # compile-check 0.1.0
-$ /tmp/cc-release/bin/compile-check --probe
+$ /tmp/cc-release/bin/pip install dist/torch_compile_check-0.1.0-py3-none-any.whl
+$ /tmp/cc-release/bin/torch-compile-check --version          # torch-compile-check 0.1.0
+$ /tmp/cc-release/bin/torch-compile-check --probe
 $ cp cases/dtype_promotion.py /tmp/case.py
-$ /tmp/cc-release/bin/compile-check /tmp/case.py ; echo "exit $?"    # exit 1
+$ /tmp/cc-release/bin/torch-compile-check /tmp/case.py ; echo "exit $?"    # exit 1
 ```
 
 `--probe` is read for the *same* rows it prints in a source checkout, not for
@@ -96,14 +96,14 @@ the installed console script ran the whole pipeline. Repeat with the sdist, so
 the source distribution is proved to build rather than assumed to:
 
 ```console
-$ /tmp/cc-release/bin/pip uninstall -y compile-check
-$ /tmp/cc-release/bin/pip install --no-binary compile-check dist/compile_check-0.1.0.tar.gz
-$ /tmp/cc-release/bin/compile-check --version
-$ /tmp/cc-release/bin/compile-check /tmp/case.py ; echo "exit $?"    # exit 1
+$ /tmp/cc-release/bin/pip uninstall -y torch-compile-check
+$ /tmp/cc-release/bin/pip install --no-binary torch-compile-check dist/torch_compile_check-0.1.0.tar.gz
+$ /tmp/cc-release/bin/torch-compile-check --version
+$ /tmp/cc-release/bin/torch-compile-check /tmp/case.py ; echo "exit $?"    # exit 1
 $ rm -rf /tmp/cc-release
 ```
 
-`--no-binary compile-check` because pip will otherwise reuse the wheel it
+`--no-binary torch-compile-check` because pip will otherwise reuse the wheel it
 already built from this version and the sdist path goes untested.
 
 **Visible to others:** nothing.
@@ -113,7 +113,7 @@ already built from this version and the sdist path goes untested.
 ## 3. Tag
 
 ```console
-$ git tag -a v0.1.0 -m "compile-check 0.1.0"
+$ git tag -a v0.1.0 -m "torch-compile-check 0.1.0"
 $ git push origin v0.1.0
 ```
 
@@ -129,7 +129,7 @@ where it is renamed:
 
 ```console
 $ sed -n '/^## \[Unreleased\]/,/^\[Unreleased\]:/p' CHANGELOG.md > /tmp/notes.md
-$ gh release create v0.1.0 --draft --title "compile-check 0.1.0" --notes-file /tmp/notes.md
+$ gh release create v0.1.0 --draft --title "torch-compile-check 0.1.0" --notes-file /tmp/notes.md
 ```
 
 `--draft` so it can be read before anyone else sees it; drop it, or publish the
@@ -144,15 +144,15 @@ Marketplace checkbox of step 7 lives.
 $ twine upload --repository testpypi dist/*
 $ python -m venv /tmp/cc-testpypi
 $ /tmp/cc-testpypi/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
-$ /tmp/cc-testpypi/bin/pip install --index-url https://test.pypi.org/simple/ --no-deps compile-check
-$ /tmp/cc-testpypi/bin/compile-check --version
+$ /tmp/cc-testpypi/bin/pip install --index-url https://test.pypi.org/simple/ --no-deps torch-compile-check
+$ /tmp/cc-testpypi/bin/torch-compile-check --version
 $ rm -rf /tmp/cc-testpypi
 ```
 
 `--no-deps` because TestPyPI does not carry torch.
 
 **Visible to others:** a public page at
-`https://test.pypi.org/project/compile-check/`, the README rendered on it, and
+`https://test.pypi.org/project/torch-compile-check/`, the README rendered on it, and
 the author name in the metadata. **Not reversible in the way that matters:** a
 filename that has been uploaded can never be uploaded again, even after
 deleting the release, so a mistake here costs a version number on TestPyPI.
@@ -172,16 +172,16 @@ account password. The *first* upload of a new project cannot use a
 project-scoped token — PyPI cannot scope a token to a project that does not
 exist there yet — so it has to run under an account-scoped token (one that
 can publish any of the account's projects). Once this upload creates the
-`compile-check` project on PyPI, go to its own Publishing settings and mint a
+`torch-compile-check` project on PyPI, go to its own Publishing settings and mint a
 token scoped to just that project, and use that narrower one for every upload
 after this first one; then revoke or forget the account-scoped token so
 nothing keeps standing access to every other project on the account. (5b
 below replaces this token dance entirely, for the tagged-release path.)
 
 **Visible to others: permanently and to everyone.**
-`https://pypi.org/project/compile-check/` becomes a public page carrying the
+`https://pypi.org/project/torch-compile-check/` becomes a public page carrying the
 README, the metadata, the author name, and both files. `pip install
-compile-check` starts working worldwide. **This cannot be undone.** A release
+torch-compile-check` starts working worldwide. **This cannot be undone.** A release
 can be *yanked* (`pip` stops resolving it for new installs) but not removed,
 the files stay downloadable by exact version, and the version number can never
 be reused. Nothing about the upload is reversible enough to treat it as a
@@ -192,8 +192,8 @@ Verify from a clean environment:
 ```console
 $ python -m venv /tmp/cc-pypi
 $ /tmp/cc-pypi/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
-$ /tmp/cc-pypi/bin/pip install compile-check
-$ /tmp/cc-pypi/bin/compile-check --version
+$ /tmp/cc-pypi/bin/pip install torch-compile-check
+$ /tmp/cc-pypi/bin/torch-compile-check --version
 $ rm -rf /tmp/cc-pypi
 ```
 
@@ -313,7 +313,7 @@ cached by a search engine, or archived while it was public stays out.
 
 ## 7. The Marketplace listing
 
-`uses: HussainNizamani/compile-check/action@v0.1.0` works for any consumer as
+`uses: HussainNizamani/torch-compile-check/action@v0.1.0` works for any consumer as
 soon as the repository is public, with or without a listing. The Marketplace is
 discoverability, not a requirement.
 
@@ -336,7 +336,7 @@ If you go ahead, the rest of the checklist is:
 - [ ] Repository public (step 6).
 - [ ] Two-factor authentication enabled on the account.
 - [ ] `action.yml` has `name`, `description`, `author`, and a `branding` block
-      with an icon and a colour — it does; `name: "compile-check"` must be
+      with an icon and a colour — it does; `name: "torch-compile-check"` must be
       unique across the Marketplace.
 - [ ] A `README.md` next to the metadata file describing the action —
       `action/README.md` is written for exactly this.
@@ -351,24 +351,24 @@ points at stay.
 
 ## 8. After the upload
 
-Once `pip install compile-check` genuinely works, four things in the repository
+Once `pip install torch-compile-check` genuinely works, four things in the repository
 stop being true and should be fixed in one small pull request:
 
 - `CHANGELOG.md`: change `## [Unreleased] → 0.1.0` to `## [0.1.0] - YYYY-MM-DD`
   and start a fresh empty `## [Unreleased]` above it.
 - `README.md` "Quick start": the `pip install git+https://...` paragraph and
   the sentence about the repository being private are both obsolete; the
-  `pip install compile-check` block becomes the first one.
+  `pip install torch-compile-check` block becomes the first one.
 - `README.md` badges. They are held back deliberately, because a badge for a
   private repository or an unpublished package renders as an error image. The
   lines to uncomment, in the placeholder comment under the title:
 
   ```markdown
-  [![CI](https://github.com/HussainNizamani/compile-check/actions/workflows/ci.yml/badge.svg)](https://github.com/HussainNizamani/compile-check/actions/workflows/ci.yml)
-  [![PyPI](https://img.shields.io/pypi/v/compile-check.svg)](https://pypi.org/project/compile-check/)
-  [![Python](https://img.shields.io/pypi/pyversions/compile-check.svg)](https://pypi.org/project/compile-check/)
+  [![CI](https://github.com/HussainNizamani/torch-compile-check/actions/workflows/ci.yml/badge.svg)](https://github.com/HussainNizamani/torch-compile-check/actions/workflows/ci.yml)
+  [![PyPI](https://img.shields.io/pypi/v/torch-compile-check.svg)](https://pypi.org/project/torch-compile-check/)
+  [![Python](https://img.shields.io/pypi/pyversions/torch-compile-check.svg)](https://pypi.org/project/torch-compile-check/)
   ```
 
-- `pyproject.toml` and `compile_check.__version__`: bump both to the next
+- `pyproject.toml` and `torch_compile_check.__version__`: bump both to the next
   development version, so `main` cannot be mistaken for the released artifact.
   `tests/test_cli.py` fails if only one of them moves.

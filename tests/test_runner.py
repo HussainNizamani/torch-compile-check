@@ -15,9 +15,9 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from compile_check.discover import Target, load_target
-from compile_check.results import TRACEBACK_LINES, BackendResult, GraphBreak, RunSet
-from compile_check.runner import (
+from torch_compile_check.discover import Target, load_target
+from torch_compile_check.results import TRACEBACK_LINES, BackendResult, GraphBreak, RunSet
+from torch_compile_check.runner import (
     ABLATION_LADDER,
     CACHE_ENV_VAR,
     FP64_BACKEND,
@@ -214,7 +214,7 @@ def test_a_failing_repeat_call_is_recorded_separately(caplog):
                 raise RuntimeError("this target answers exactly once")
             return x * 2
 
-    with caplog.at_level(logging.WARNING, logger="compile_check"):
+    with caplog.at_level(logging.WARNING, logger="torch_compile_check"):
         result = run_backend(SecondCallRaises(), (torch.ones(3),), "eager", grad=False)
 
     assert result.ok
@@ -297,7 +297,7 @@ def test_a_module_that_cannot_be_copied_is_shared_with_a_warning(caplog):
 
     module = Uncopyable()
     target = Target(fn=module, example_inputs=(torch.ones(3),), name="inline:uncopyable")
-    with caplog.at_level(logging.WARNING, logger="compile_check"):
+    with caplog.at_level(logging.WARNING, logger="torch_compile_check"):
         runset = run_all(target, ["eager"], grad=False)
 
     assert runset.results["eager"].ok
@@ -529,7 +529,7 @@ def test_a_target_that_cannot_be_copied_leaves_the_fp64_reference_unset(caplog):
         def forward(self, x):
             return x * 2
 
-    with caplog.at_level(logging.WARNING, logger="compile_check"):
+    with caplog.at_level(logging.WARNING, logger="torch_compile_check"):
         assert run_fp64_reference(Uncopyable(), (torch.ones(3),)) is None
     assert "no fp64 reference" in caplog.text
 

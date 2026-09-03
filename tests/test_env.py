@@ -6,7 +6,7 @@ import platform
 
 import torch
 
-from compile_check.env import PROBED_APIS, _resolves, collect_environment, probe_apis
+from torch_compile_check.env import PROBED_APIS, _resolves, collect_environment, probe_apis
 
 EXPECTED_KEYS = {
     "torch_version",

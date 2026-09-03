@@ -21,7 +21,7 @@ Four passes, and the plan's own numbering for them.
    because shrinking a feature dimension usually changes which kernel is
    selected.
 3. Backend bisection. Already done: it is the ablation ladder that
-   :mod:`compile_check.localize` walked to produce the stage verdict, and this
+   :mod:`torch_compile_check.localize` walked to produce the stage verdict, and this
    module neither repeats nor second-guesses it.
 4. Built-in minifier handoff, for the FX level. :func:`handoff_note` writes the
    two environment variables and says what they do. It is deliberately *not*
@@ -43,10 +43,10 @@ one lane the finding was reported against -- and no others. PLAN.md "Runner
 semantics" makes eager the reference world, so a candidate cannot be judged
 without it, and the other lanes on the ladder have already said what they had to
 say. Each lane gets its own module copy, exactly as
-:func:`compile_check.runner.run_all` gives one to each backend.
+:func:`torch_compile_check.runner.run_all` gives one to each backend.
 
 Torch is imported inside the functions, never at module scope, for the reason
-:mod:`compile_check.runner` gives.
+:mod:`torch_compile_check.runner` gives.
 """
 
 from __future__ import annotations
@@ -59,10 +59,10 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from compile_check.discover import Target
-from compile_check.oracles import Finding, OracleConfig, run_oracles
-from compile_check.results import RunSet
-from compile_check.runner import lane_module, run_backend
+from torch_compile_check.discover import Target
+from torch_compile_check.oracles import Finding, OracleConfig, run_oracles
+from torch_compile_check.results import RunSet
+from torch_compile_check.runner import lane_module, run_backend
 
 __all__ = [
     "MAX_STEPS",
@@ -81,7 +81,7 @@ __all__ = [
     "stub_children",
 ]
 
-log = logging.getLogger("compile_check")
+log = logging.getLogger("torch_compile_check")
 
 # How many candidates the minimizer may evaluate when ``--budget`` gives it no
 # wall clock to work to. A candidate is two lane runs, one of which compiles, so
@@ -214,7 +214,7 @@ class Budget:
 class Minimization:
     """What the minimizer did, in the form every report renders.
 
-    Data only, like :mod:`compile_check.results`: no live module and no tensor,
+    Data only, like :mod:`torch_compile_check.results`: no live module and no tensor,
     so the record survives into the JSON artifact without either having to be
     re-derived. The minimized *target* itself is not carried, because nothing
     downstream runs it -- the test emitter writes the two changes below into the
@@ -335,15 +335,15 @@ def handoff_note(finding: Finding) -> str:
         return (
             "torch's own accuracy minifier can take this down to the FX graph level. Run the "
             f"target again with {REPRO_AFTER} {REPRO_LEVEL} set in the environment and it will "
-            "write a minified repro directory. compile-check does not run it: the minifier can "
-            'end with "Input graph did not fail the tester", and a pass that declines is worth '
-            "less than the module and the inputs above."
+            "write a minified repro directory. torch-compile-check does not run it: the "
+            'minifier can end with "Input graph did not fail the tester", and a pass that '
+            "declines is worth less than the module and the inputs above."
         )
     return (
         f"torch's accuracy minifier ({REPRO_AFTER} {REPRO_LEVEL}) compares numbers only, so it "
         f"would not isolate this {finding.oracle} finding; the two variables are here because "
-        "they are the next step for a numerics divergence, not for this one. compile-check does "
-        "not run it either way."
+        "they are the next step for a numerics divergence, not for this one. "
+        "torch-compile-check does not run it either way."
     )
 
 
@@ -354,7 +354,7 @@ def reproducer(
 ) -> Reproduces:
     """Build the predicate that answers whether one candidate still shows ``finding``.
 
-    Two lanes per call, run exactly the way :func:`compile_check.runner.run_all`
+    Two lanes per call, run exactly the way :func:`torch_compile_check.runner.run_all`
     ran them -- same device, same seed, same ``fullgraph`` and ``dynamic``, own
     module copy each -- and then the one oracle that produced the finding, so
     that a candidate is judged by the same rule the report was written from.
@@ -637,7 +637,7 @@ def minimize(
 
     Args:
         target: what the run was made from, from
-            :func:`compile_check.discover.load_target`. Its module has already
+            :func:`torch_compile_check.discover.load_target`. Its module has already
             been placed on the device by the runner, so the candidates run where
             the finding was found.
         runset: the run the finding came from, for the lane settings the

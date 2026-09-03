@@ -48,8 +48,8 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from compile_check.oracles.base import Finding, OracleConfig, Severity, align_outputs
-from compile_check.results import BackendResult, TensorMeta
+from torch_compile_check.oracles.base import Finding, OracleConfig, Severity, align_outputs
+from torch_compile_check.results import BackendResult, TensorMeta
 
 __all__ = [
     "META_FIELDS",
@@ -60,7 +60,7 @@ __all__ = [
     "relation",
 ]
 
-log = logging.getLogger("compile_check")
+log = logging.getLogger("torch_compile_check")
 
 # The layout fields an in-place metadata mutation moves: resize_ changes the
 # shape and the stride, as_strided_ and set_ can change all four. Addresses are
@@ -235,7 +235,7 @@ class AliasOracle:
 
         ``cfg`` is unused: an alias either holds or it does not, so there is no
         tolerance to apply. The parameter stays because it is the
-        :class:`~compile_check.oracles.base.Oracle` protocol.
+        :class:`~torch_compile_check.oracles.base.Oracle` protocol.
         """
         del cfg
         torch = importlib.import_module("torch")

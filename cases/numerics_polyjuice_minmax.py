@@ -1,4 +1,4 @@
-"""190765 as a compile-check target: a fixed miscompile, expected GREEN.
+"""190765 as a torch-compile-check target: a fixed miscompile, expected GREEN.
 
 Issue: https://github.com/pytorch/pytorch/issues/190765 (closed as
 completed 2026-07-27). Fix PR:
@@ -21,7 +21,7 @@ member of the equivalence class that miscompiled, not the simpler
 `X @ (A + B)` or the more complex 125-cost form that both compiled correctly
 even pre-fix -- written to the discovery convention of PLAN.md, a
 module-level `fn` and `inputs`, so that
-`compile-check cases/numerics_polyjuice_minmax.py` runs it through the tool
+`torch-compile-check cases/numerics_polyjuice_minmax.py` runs it through the tool
 itself.
 
 Version marker. `numerics_cpu_inductor_miscompile.py` names the file
@@ -29,7 +29,7 @@ Version marker. `numerics_cpu_inductor_miscompile.py` names the file
 does not: torch is polymorphic in the equivalence class it picks, and this
 twin exercises the one member of that class the issue found wrong. Measured
 on torch `2.14.0+cpu` (git `08187d9`, aarch64, CPU-only, caches disabled),
-which postdates #190966: `compile-check cases/numerics_polyjuice_minmax.py`
+which postdates #190966: `torch-compile-check cases/numerics_polyjuice_minmax.py`
 is exit 0, clean, no findings, matching the standalone script's GREEN on
 this build. The issue reports RED on torch 2.13.0 (pre-fix); a torch that
 predates #190966 is expected to turn this case exit 1 (numerics finding on

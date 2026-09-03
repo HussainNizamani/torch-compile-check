@@ -22,7 +22,7 @@ running, which is what makes it testable at all.
 What a verdict means, since the three words are load-bearing:
 
 * ``RED`` -- this torch is expected to reproduce the bug. The standalone script
-  exits 1, and ``compile-check`` on the twin reports the finding.
+  exits 1, and ``torch-compile-check`` on the twin reports the finding.
 * ``GREEN`` -- this torch is expected to be clean, because it carries the fix.
   A case whose bug is fixed is not deleted; it becomes a regression test that
   the fix is still there.

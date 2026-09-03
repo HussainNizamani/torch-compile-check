@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import pytest
 
-from compile_check import __version__
-from compile_check.localize import localize
-from compile_check.minimize import Kept, Minimization, Shrink, Stub
-from compile_check.oracles import Finding
-from compile_check.report.markdown import render, title
-from compile_check.results import BackendResult, CapturedException, RunSet, TargetSource
+from torch_compile_check import __version__
+from torch_compile_check.localize import localize
+from torch_compile_check.minimize import Kept, Minimization, Shrink, Stub
+from torch_compile_check.oracles import Finding
+from torch_compile_check.report.markdown import render, title
+from torch_compile_check.results import BackendResult, CapturedException, RunSet, TargetSource
 
 ENV = {
     "torch_version": "2.14.0+cpu",
@@ -85,9 +85,9 @@ def draft(runset: RunSet, findings=(FINDING,), **kwargs) -> str:
 EXPECTED = f"""\
 # [inductor] torch.compile changes the output dtype of cases/dtype_promotion.py
 
-> Drafted by [compile-check](https://github.com/HussainNizamani/compile-check) {__version__}. \
-The line above is the issue title; everything below is the body. Read it, check it, and edit it \
-before filing -- the tool drafts, a person files.
+> Drafted by [torch-compile-check](https://github.com/HussainNizamani/torch-compile-check) \
+{__version__}. The line above is the issue title; everything below is the body. Read it, check \
+it, and edit it before filing -- the tool drafts, a person files.
 
 `dtype_promotion:fn` was run under eager and `inductor` on the environment at the bottom of this \
 report. The oracles reported 1 finding, all of them fail-severity. First diverges at inductor, \
@@ -96,7 +96,7 @@ which implicates inductor lowering/codegen.
 ## Repro
 
 The target's own source, reduced to the statements the entry point and the inputs need. It is the \
-whole case: run compile-check again with `--minimize` to shrink it.
+whole case: run torch-compile-check again with `--minimize` to shrink it.
 
 ```python
 from __future__ import annotations
@@ -110,7 +110,7 @@ def fn(a: torch.Tensor) -> torch.Tensor:
 
 inputs = (torch.ones((2, 2), dtype=torch.int8),)
 
-# compile-check ran it like this. It gives each lane its own clone of the inputs,
+# torch-compile-check ran it like this. It gives each lane its own clone of the inputs,
 # so rebuild them between the two calls if the target mutates what it is given.
 expected = fn(*inputs)
 actual = torch.compile(fn, backend="inductor")(*inputs)
@@ -164,7 +164,7 @@ class TestDtypePromotion(unittest.TestCase):
 ## How this was produced
 
 ```console
-$ compile-check cases/dtype_promotion.py --backends eager,inductor --fail-on metadata
+$ torch-compile-check cases/dtype_promotion.py --backends eager,inductor --fail-on metadata
 ```
 """
 
@@ -208,7 +208,7 @@ def test_every_oracle_has_a_phrase_for_the_title(runset, oracle, expected):
 def test_a_clean_run_drafts_a_record_rather_than_a_bug_report(runset):
     text = draft(runset, findings=())
 
-    assert text.startswith("# compile-check found no divergence on cases/dtype_promotion.py")
+    assert text.startswith("# torch-compile-check found no divergence on cases/dtype_promotion.py")
     assert "a record of a clean run rather than a bug report" in text
     # Nothing to assert, so no test section; the environment block stays,
     # because a clean run on a named machine is still evidence.
@@ -257,7 +257,7 @@ def test_a_model_that_raised_in_eager_names_it_in_the_title_not_the_lane(runset)
     verdict = localize(runset, [])
 
     assert title(runset, [], verdict) == (
-        "compile-check could not compare cases/dtype_promotion.py: "
+        "torch-compile-check could not compare cases/dtype_promotion.py: "
         "the eager reference raised ValueError"
     )
     assert "torch.compile raises" not in title(runset, [], verdict)
@@ -288,7 +288,7 @@ def test_no_eager_lane_at_all_names_no_reference_in_the_title_not_the_lane(runse
     verdict = localize(runset, [])
 
     assert title(runset, [], verdict) == (
-        "compile-check could not compare cases/dtype_promotion.py: "
+        "torch-compile-check could not compare cases/dtype_promotion.py: "
         "the run had no eager lane to compare against"
     )
     assert "torch.compile raises" not in title(runset, [], verdict)
@@ -338,7 +338,7 @@ def test_the_command_block_carries_the_flags_that_change_the_run(runset):
     text = draft(runset)
 
     assert (
-        "$ compile-check cases/dtype_promotion.py --backends eager,inductor --fullgraph "
+        "$ torch-compile-check cases/dtype_promotion.py --backends eager,inductor --fullgraph "
         "--dynamic --no-grad --share-module --seed 7" in text
     )
 
@@ -367,7 +367,10 @@ def section(text: str, title: str) -> str:
 
 def test_a_draft_without_the_minimizer_says_the_repro_is_the_whole_case(runset):
     text = draft(runset)
-    assert "It is the whole case: run compile-check again with `--minimize` to shrink it." in text
+    assert (
+        "It is the whole case: run torch-compile-check again with `--minimize` to shrink it."
+        in text
+    )
     assert "## Minimized" not in text
 
 

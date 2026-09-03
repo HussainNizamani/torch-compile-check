@@ -27,18 +27,18 @@ import textwrap
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any
 
-from compile_check import __version__
-from compile_check.localize import GRAPH_ORACLE, MODEL, NO_REFERENCE, StageVerdict
-from compile_check.minimize import Minimization
-from compile_check.oracles import (
+from torch_compile_check import __version__
+from torch_compile_check.localize import GRAPH_ORACLE, MODEL, NO_REFERENCE, StageVerdict
+from torch_compile_check.minimize import Minimization
+from torch_compile_check.oracles import (
     DEFAULT_GRAD_TOL_FACTOR,
     ORACLE_NAMES,
     ORACLES,
     Finding,
     Severity,
 )
-from compile_check.results import BackendResult, RunSet
-from compile_check.runner import FP64_BACKEND
+from torch_compile_check.results import BackendResult, RunSet
+from torch_compile_check.runner import FP64_BACKEND
 
 __all__ = ["DEFAULT_MAX_FINDINGS", "render"]
 
@@ -142,9 +142,9 @@ def render(
     """Render one run as the terminal report.
 
     Args:
-        runset: the run, from :func:`compile_check.runner.run_all`.
+        runset: the run, from :func:`torch_compile_check.runner.run_all`.
         findings: every finding the oracles produced, in oracle order.
-        verdict: the stage verdict, from :func:`compile_check.localize.localize`.
+        verdict: the stage verdict, from :func:`torch_compile_check.localize.localize`.
         fail_on: the ``--fail-on`` categories, so the checks table can show
             which of them would turn a finding into exit code 1. Every
             implemented oracle runs whatever this says; the flag decides the
@@ -202,7 +202,7 @@ def _painter(color: bool) -> Paint:
 
 def _header(runset: RunSet, paint: Paint) -> str:
     """One line: which tool, which version, which target."""
-    return f"{paint('compile-check', 'bold')} {__version__}   target {runset.target_name}"
+    return f"{paint('torch-compile-check', 'bold')} {__version__}   target {runset.target_name}"
 
 
 def _environment(

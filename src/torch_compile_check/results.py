@@ -1,7 +1,7 @@
 """The records a run produces, and nothing else.
 
 PLAN.md "Package layout" does not name this module; it is the shared vocabulary
-that :mod:`compile_check.runner`, the five oracles, and the three reports all
+that :mod:`torch_compile_check.runner`, the five oracles, and the three reports all
 speak, and putting it in ``runner.py`` would have made every oracle import the
 runner.
 
@@ -98,7 +98,7 @@ class TargetSource:
     One record rather than five fields on :class:`RunSet`, because the five are
     one fact -- what discovery resolved -- and a report that has any of them
     wants the rest. ``None`` on a :class:`RunSet` means the run was not built
-    through :func:`compile_check.discover.load_target` (a hand-built record, or
+    through :func:`torch_compile_check.discover.load_target` (a hand-built record, or
     a target with no file), which is not the same as a target whose file could
     not be read: that one arrives with :attr:`text` at ``None``.
     """
@@ -161,7 +161,7 @@ class GraphBreak:
 class GraphHealth:
     """What one compiled lane's graphs looked like (PLAN.md "graph").
 
-    Filled by :func:`compile_check.runner.run_backend` from
+    Filled by :func:`torch_compile_check.runner.run_backend` from
     ``torch._dynamo.explain`` and from ``counters['stats']['unique_graphs']``
     sampled around the repeat call, and read by the graph oracle. Not recorded
     for ``eager`` or ``eager_fp64``: neither is compiled, so neither has graphs.
@@ -177,7 +177,7 @@ class GraphHealth:
     wrong at both ends: a callable Dynamo captured no graph for comes back as
     ``-1``, and a break whose resumption produced no second graph comes back one
     lower than the number of reasons recorded. The floors are applied once, in
-    :func:`compile_check.runner._graph_health`, so that a negative count cannot
+    :func:`torch_compile_check.runner._graph_health`, so that a negative count cannot
     read as an improvement against a baseline and a break with a reason is never
     counted as no break at all.
     """
@@ -448,7 +448,7 @@ class RunSet:
     target_source: TargetSource | None = None
     """Where the target came from and what it was written as, or ``None``.
 
-    Filled by :func:`compile_check.runner.run_all` from the discovered target,
+    Filled by :func:`torch_compile_check.runner.run_all` from the discovered target,
     and read only by the Markdown draft and the test emitter of M3-2, which are
     the two reports that quote the user's code. Nothing here is compared.
     """

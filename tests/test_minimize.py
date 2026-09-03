@@ -16,8 +16,8 @@ import pytest
 import torch
 from torch import nn
 
-from compile_check.discover import load_target
-from compile_check.minimize import (
+from torch_compile_check.discover import load_target
+from torch_compile_check.minimize import (
     Budget,
     Minimization,
     Outcome,
@@ -28,13 +28,13 @@ from compile_check.minimize import (
     shrink_inputs,
     stub_children,
 )
-from compile_check.oracles import Finding, OracleConfig, run_oracles
-from compile_check.report.pytest_case import select
-from compile_check.runner import run_all
+from torch_compile_check.oracles import Finding, OracleConfig, run_oracles
+from torch_compile_check.report.pytest_case import select
+from torch_compile_check.runner import run_all
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 DIVERGENT = FIXTURES / "divergent_child.py"
-PERTURBS = "compile_check_perturbs"
+PERTURBS = "torch_compile_check_perturbs"
 
 
 def always(fn, args, kwargs):

@@ -2,12 +2,12 @@
 RED/GREEN script and a discovery-convention twin the tool itself can run.
 This module is the twin's contract: for each pair, the standalone script's
 own RED/GREEN verdict on the installed torch is the ground truth, and
-`compile-check <twin>` must agree with it -- RED means exit 1 with the
+`torch-compile-check <twin>` must agree with it -- RED means exit 1 with the
 finding named in the twin's docstring, GREEN means exit 0 clean.
 
 The standalone scripts are run in a subprocess (they are not import-safe as
 a module: each defines its own `main()` and calls `sys.exit`), the twins
-through `compile-check`'s own `main()` in-process, following the pattern
+through `torch-compile-check`'s own `main()` in-process, following the pattern
 `test_cli.py::test_the_tool_reports_the_copyback_alias_case_end_to_end`
 already uses for `alias_copyback.py`. A standalone script that exits 2
 (crashed outright) skips the pair rather than asserting anything -- a crash
@@ -23,14 +23,14 @@ from pathlib import Path
 
 import pytest
 
-from compile_check.cli import EXIT_FINDING, EXIT_OK, main
+from torch_compile_check.cli import EXIT_FINDING, EXIT_OK, main
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CASES = REPO_ROOT / "cases"
 
 # standalone: the RED/GREEN script FINDINGS.md keys on.
-# twin: the discovery-convention file compile-check runs directly.
-# extra_args: flags compile-check needs to exercise the same shape the
+# twin: the discovery-convention file torch-compile-check runs directly.
+# extra_args: flags torch-compile-check needs to exercise the same shape the
 #   standalone script checks (PLAN.md "CLI surface for v1"); empty when the
 #   default invocation already matches.
 # red_stage_backend: the backend named in the stage verdict's
@@ -104,12 +104,12 @@ def test_twin_agrees_with_the_standalone_scripts_verdict(
     if is_red:
         assert code == EXIT_FINDING, (
             f"{standalone} was RED ({completed.stdout.strip()!r}) but "
-            f"compile-check {twin} exited {code}, not {EXIT_FINDING}"
+            f"torch-compile-check {twin} exited {code}, not {EXIT_FINDING}"
         )
         assert f"first diverges at {red_stage_backend}" in out, out
     else:
         assert code == EXIT_OK, (
             f"{standalone} was GREEN ({completed.stdout.strip()!r}) but "
-            f"compile-check {twin} exited {code}, not {EXIT_OK}"
+            f"torch-compile-check {twin} exited {code}, not {EXIT_OK}"
         )
         assert "clean:" in out, out

@@ -14,12 +14,12 @@ from pathlib import Path
 
 import pytest
 
-from compile_check import __version__
-from compile_check.localize import localize
-from compile_check.minimize import Kept, Minimization, Shrink, Stub
-from compile_check.oracles import Finding
-from compile_check.report.json import SCHEMA_VERSION, build, dump, validate
-from compile_check.results import (
+from torch_compile_check import __version__
+from torch_compile_check.localize import localize
+from torch_compile_check.minimize import Kept, Minimization, Shrink, Stub
+from torch_compile_check.oracles import Finding
+from torch_compile_check.report.json import SCHEMA_VERSION, build, dump, validate
+from torch_compile_check.results import (
     BackendResult,
     CapturedException,
     GraphBreak,
@@ -116,7 +116,7 @@ def test_the_top_level_shape_is_the_documented_one(runset):
     built = document(runset, exit_code=1)
 
     assert built["schema_version"] == SCHEMA_VERSION
-    assert built["tool"] == {"name": "compile-check", "version": __version__}
+    assert built["tool"] == {"name": "torch-compile-check", "version": __version__}
     assert built["target"] == {
         "name": "dtype_promotion:fn",
         "file": "cases/dtype_promotion.py",

@@ -21,7 +21,7 @@ diverges at <backend>" and never "the bug is in <backend>"; :attr:`StageVerdict.
 carries the caveat so that no report has to remember to add it.
 
 Nothing here imports torch: a verdict is computed from the records in
-:mod:`compile_check.results` and the findings the oracles already produced.
+:mod:`torch_compile_check.results` and the findings the oracles already produced.
 """
 
 from __future__ import annotations
@@ -30,9 +30,9 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from compile_check.oracles.base import Finding
-from compile_check.results import CapturedException, RunSet
-from compile_check.runner import ABLATION_LADDER, FP64_BACKEND
+from torch_compile_check.oracles.base import Finding
+from torch_compile_check.results import CapturedException, RunSet
+from torch_compile_check.runner import ABLATION_LADDER, FP64_BACKEND
 
 __all__ = [
     "CLEAN",
@@ -46,7 +46,7 @@ __all__ = [
     "localize",
 ]
 
-log = logging.getLogger("compile_check")
+log = logging.getLogger("torch_compile_check")
 
 # The three verdicts that name no compilation stage, because no compilation
 # stage is implicated.
@@ -210,13 +210,13 @@ def localize(runset: RunSet, findings: Sequence[Finding] = ()) -> StageVerdict:
     1. no eager lane -- :data:`NO_REFERENCE`, nothing was compared;
     2. eager raised -- :data:`MODEL`, the model is broken before compile is
        involved, and the ladder stops there;
-    3. otherwise the first lane in :data:`~compile_check.runner.ABLATION_LADDER`
+    3. otherwise the first lane in :data:`~torch_compile_check.runner.ABLATION_LADDER`
        order that raised or drew a fail-severity finding names the stage, via
        :func:`implicated_stage`;
     4. no such lane -- :data:`CLEAN`.
 
     Args:
-        runset: the run to read, from :func:`compile_check.runner.run_all`.
+        runset: the run to read, from :func:`torch_compile_check.runner.run_all`.
         findings: every finding the oracles produced for that run, in any order.
 
     Returns:

@@ -38,7 +38,7 @@ from typing import Any
 import torch
 from torch import nn
 
-BACKEND = "compile_check_perturbs"
+BACKEND = "torch_compile_check_perturbs"
 """The backend name to pass to ``--backends``."""
 
 PERTURBATION = 0.5

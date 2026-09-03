@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from compile_check.discover import DiscoveryError, Target, load_target
+from torch_compile_check.discover import DiscoveryError, Target, load_target
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
@@ -115,7 +115,7 @@ def test_missing_file_is_a_discovery_error():
 
 def test_unimportable_module_name_is_a_discovery_error():
     with pytest.raises(DiscoveryError) as excinfo:
-        load_target("compile_check_no_such_module")
+        load_target("torch_compile_check_no_such_module")
     assert "neither an existing file nor an importable module" in str(excinfo.value)
 
 

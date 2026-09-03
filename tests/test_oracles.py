@@ -27,8 +27,8 @@ from typing import Any
 import pytest
 import torch
 
-from compile_check.discover import import_target_module, load_target
-from compile_check.oracles import (
+from torch_compile_check.discover import import_target_module, load_target
+from torch_compile_check.oracles import (
     DEFAULT_GRAD_TOL_FACTOR,
     ORACLE_NAMES,
     ORACLES,
@@ -39,9 +39,9 @@ from compile_check.oracles import (
     OracleConfig,
     run_oracles,
 )
-from compile_check.oracles.alias import AliasOracle, relation
-from compile_check.oracles.grad import GradOracle
-from compile_check.oracles.graph import (
+from torch_compile_check.oracles.alias import AliasOracle, relation
+from torch_compile_check.oracles.grad import GradOracle
+from torch_compile_check.oracles.graph import (
     MAX_REASON_CHARS,
     BaselineError,
     GraphOracle,
@@ -50,10 +50,20 @@ from compile_check.oracles.graph import (
     summarise_reason,
     write_baseline,
 )
-from compile_check.oracles.metadata import MetadataOracle
-from compile_check.oracles.numerics import FALLBACK_TOLERANCES, NumericsOracle, resolve_tolerances
-from compile_check.results import BackendResult, CapturedException, GraphBreak, GraphHealth, RunSet
-from compile_check.runner import FP64_BACKEND, run_all, run_backend
+from torch_compile_check.oracles.metadata import MetadataOracle
+from torch_compile_check.oracles.numerics import (
+    FALLBACK_TOLERANCES,
+    NumericsOracle,
+    resolve_tolerances,
+)
+from torch_compile_check.results import (
+    BackendResult,
+    CapturedException,
+    GraphBreak,
+    GraphHealth,
+    RunSet,
+)
+from torch_compile_check.runner import FP64_BACKEND, run_all, run_backend
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -1630,7 +1640,7 @@ def test_a_stateful_module_is_a_numerics_finding_only_when_the_lanes_share_it():
 # the regression corpus, as shapes rather than as runs
 #
 # Whether each corpus case still reproduces on the installed torch, and whether
-# compile-check reports it when it does, is tests/test_corpus_oracles.py: one
+# torch-compile-check reports it when it does, is tests/test_corpus_oracles.py: one
 # parametrized run of every case through the runner and every oracle, graded
 # against the case's own check(). What is left here is the half of each case
 # that does not depend on the torch build -- the shape of the bug, handed to an

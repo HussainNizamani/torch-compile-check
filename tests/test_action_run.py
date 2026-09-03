@@ -1,4 +1,4 @@
-"""Tests for ``action/run.sh``, the composite action's "Run compile-check" step.
+"""Tests for ``action/run.sh``, the composite action's "Run torch-compile-check" step.
 
 The step body lives in a file rather than inline in ``action/action.yml`` so it
 can be executed here, which is the only way to test the thing CI actually runs:
@@ -53,7 +53,7 @@ DEFAULT_ENV = {
     "MINIMIZE": "false",
     "BUDGET": "",
     "CACHE": "false",
-    "JSON_OUT": "compile-check-results.json",
+    "JSON_OUT": "torch-compile-check-results.json",
     "EXTRA_ARGS": "",
     "ALLOW_UNIMPLEMENTED": "false",
 }
@@ -261,9 +261,9 @@ def test_an_unset_input_variable_is_named_rather_than_an_unbound_variable_crash(
 
 
 def _step_env_names() -> list[str]:
-    """The variable names action.yml's "Run compile-check" step exports."""
+    """The variable names action.yml's "Run torch-compile-check" step exports."""
     text = ACTION_YML.read_text()
-    block = text[text.index("- name: Run compile-check") :]
+    block = text[text.index("- name: Run torch-compile-check") :]
     block = block[block.index("env:") : block.index("run:")]
     return re.findall(r"^\s{8}([A-Z_]+):", block, flags=re.MULTILINE)
 

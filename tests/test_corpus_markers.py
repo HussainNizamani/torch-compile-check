@@ -38,7 +38,7 @@ import torch
 
 from cases.markers import CASES, MARKERS, expected_verdict, parse_torch_version
 from cases.summary import CASES_DIR, observe, render_table
-from compile_check.oracles import ORACLE_NAMES
+from torch_compile_check.oracles import ORACLE_NAMES
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TORCH_VERSION = str(torch.__version__)

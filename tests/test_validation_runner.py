@@ -60,7 +60,7 @@ def test_an_extra_that_is_installed_but_will_not_import_is_a_skip_and_not_a_tool
     # The M4-2 estate run: transformers 5 moved `from transformers import
     # BertModel` behind a lazy import that raises, find_spec said the package
     # was present, and hf_tiny_bert came back as a tool error -- which reads as
-    # "compile-check is broken" rather than "this environment cannot build the
+    # "torch-compile-check is broken" rather than "this environment cannot build the
     # target". Reproduced here with a package that is always installed and an
     # import from it that never works.
     (targets / "broken_extra.py").write_text(

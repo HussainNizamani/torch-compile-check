@@ -1,7 +1,7 @@
-# compile-check
+# torch-compile-check
 
 Differential testing for `torch.compile`, in CI. This composite action installs
-`compile-check`, runs it against the entrypoints you declare, fails the job on
+`torch-compile-check`, runs it against the entrypoints you declare, fails the job on
 the categories you choose, and writes a job-summary row per target with its
 stage verdict. See [`docs/action.md`](../docs/action.md) for the full inputs
 and outputs reference, baseline semantics, and how the action degrades
@@ -11,7 +11,7 @@ honestly today; this file is the Marketplace-facing summary.
 
 Point it at one or more discovery-convention targets (PLAN.md "Discovery
 convention": a module-level `model` or `fn`, plus `inputs` or `get_inputs()`).
-For each target, the action runs `compile-check` under eager and every
+For each target, the action runs `torch-compile-check` under eager and every
 compiled backend you list, compares numerics, aliasing, output metadata, and
 gradients against eager, and reports the first backend a divergence appears
 at. The job fails when a finding lands in one of your `fail-on` categories, or
@@ -20,7 +20,7 @@ when a compiled backend raises where eager did not.
 ## Usage
 
 ```yaml
-name: compile-check
+name: torch-compile-check
 
 on:
   push:
@@ -38,21 +38,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: HussainNizamani/compile-check/action@main
-        id: compile-check
+      - uses: HussainNizamani/torch-compile-check/action@main
+        id: torch-compile-check
         with:
           targets: |
             models/classifier.py
             models/encoder.py:build_model:build_inputs
           torch: ${{ matrix.torch }}
-          baseline: .compile-check/baseline.json
+          baseline: .torch-compile-check/baseline.json
 
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: compile-check-results-${{ matrix.torch }}
-          path: ${{ steps.compile-check.outputs.json-path }}*
+          name: torch-compile-check-results-${{ matrix.torch }}
+          path: ${{ steps.torch-compile-check.outputs.json-path }}*
 ```
 
 ## Inputs and outputs
@@ -103,10 +103,10 @@ tested outside a workflow (`tests/test_action_run.py`,
 
 ## Installing from source: the `source` input
 
-`compile-check` is not on PyPI yet. `source: auto` (the default) installs
+`torch-compile-check` is not on PyPI yet. `source: auto` (the default) installs
 from the checked-out repository's own source when the action runs inside this
 repo — which is what the self-test workflow in this repository uses — and
-falls back to `git+https://github.com/HussainNizamani/compile-check@ref`
+falls back to `git+https://github.com/HussainNizamani/torch-compile-check@ref`
 otherwise, which is what a consuming repository's workflow actually exercises.
 `source: git` forces the git install explicitly; while this repository is
 private, that path needs credentials pip does not have, which is a real,
@@ -129,10 +129,10 @@ of wrong answers. Full detail in
 
 ## Degrading honestly on a pre-M1-3 `ref`
 
-`compile-check`'s main run path — the oracles, stage localization, and the
+`torch-compile-check`'s main run path — the oracles, stage localization, and the
 terminal/JSON/Markdown reports — landed in M1-3 of [PLAN.md](../PLAN.md)
-([PR #6](https://github.com/HussainNizamani/compile-check/pull/6)), so
-`compile-check <target>` on `main` (the default `ref`) runs for real today:
+([PR #6](https://github.com/HussainNizamani/torch-compile-check/pull/6)), so
+`torch-compile-check <target>` on `main` (the default `ref`) runs for real today:
 exit 0 clean, 1 on a `--fail-on` finding, 2 on a tool error. Only a `ref`
 pinned to a commit *before* M1-3 still exits 2 with a fixed "not implemented"
 message for any real target. This action detects exactly that message and,

@@ -30,7 +30,7 @@ script's own source is byte-for-byte what produced it, so a torch upgrade or an
 edited case re-runs rather than reports a stale verdict. Nothing depends on the
 file: it is written best-effort, every read failure falls back to running the
 script, and the table says how many rows came from it.
-``COMPILE_CHECK_OBSERVATIONS`` points the file somewhere else; set to an empty
+``TORCH_COMPILE_CHECK_OBSERVATIONS`` points the file somewhere else; set to an empty
 value it switches that half of the caching off entirely.
 
 Nothing here decides that a disagreement is a failure. PLAN.md "Regression
@@ -107,7 +107,7 @@ class Observation:
     """
 
 
-CACHE_ENV_VAR = "COMPILE_CHECK_OBSERVATIONS"
+CACHE_ENV_VAR = "TORCH_COMPILE_CHECK_OBSERVATIONS"
 """Where to keep the cross-process observation cache. Empty value: nowhere."""
 
 
@@ -142,7 +142,7 @@ def cache_file() -> Path | None:
     if override is not None:
         return Path(override) if override.strip() else None
     digest = hashlib.sha256(str(CASES_DIR).encode("utf-8")).hexdigest()[:12]
-    return Path(tempfile.gettempdir()) / f"compile-check-observations-{digest}.json"
+    return Path(tempfile.gettempdir()) / f"torch-compile-check-observations-{digest}.json"
 
 
 def _read_cache() -> dict[str, Any]:
@@ -286,7 +286,7 @@ def _verdict_line(stdout: str, stderr: str) -> str:
 def render_table(observations: list[Observation], torch_version: str, git_version: str) -> str:
     """One Markdown table of observed against expected, plus a one-line count."""
     heading = (
-        f"### compile-check regression corpus -- torch {torch_version}"
+        f"### torch-compile-check regression corpus -- torch {torch_version}"
         f"{f' (git {git_version[:12]})' if git_version else ''}, "
         f"python {platform.python_version()}, {platform.machine()}"
     )

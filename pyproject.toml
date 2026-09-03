@@ -11,8 +11,8 @@ requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
-name = "compile-check"
-# Kept in step with compile_check.__version__; tests/test_cli.py fails if the
+name = "torch-compile-check"
+# Kept in step with torch_compile_check.__version__; tests/test_cli.py fails if the
 # two drift apart. The tag, the PyPI upload, and the Marketplace listing are
 # the maintainer's own step and are written out in docs/release.md -- this
 # number moving is what makes them possible, not a claim that they happened.
@@ -94,17 +94,17 @@ validation = [
 ]
 
 [project.scripts]
-compile-check = "compile_check.cli:main"
+torch-compile-check = "torch_compile_check.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/HussainNizamani/compile-check"
-Source = "https://github.com/HussainNizamani/compile-check"
-Documentation = "https://github.com/HussainNizamani/compile-check/blob/main/docs/README.md"
-Issues = "https://github.com/HussainNizamani/compile-check/issues"
-Changelog = "https://github.com/HussainNizamani/compile-check/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/HussainNizamani/torch-compile-check"
+Source = "https://github.com/HussainNizamani/torch-compile-check"
+Documentation = "https://github.com/HussainNizamani/torch-compile-check/blob/main/docs/README.md"
+Issues = "https://github.com/HussainNizamani/torch-compile-check/issues"
+Changelog = "https://github.com/HussainNizamani/torch-compile-check/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/compile_check"]
+packages = ["src/torch_compile_check"]
 
 [tool.ruff]
 line-length = 100
@@ -132,8 +132,8 @@ select = [
 
 # PLAN.md and the M0 brief: no `print` outside cli.py and report/.
 [tool.ruff.lint.per-file-ignores]
-"src/compile_check/cli.py" = ["T20"]
-"src/compile_check/report/*.py" = ["T20"]
+"src/torch_compile_check/cli.py" = ["T20"]
+"src/torch_compile_check/report/*.py" = ["T20"]
 "tests/*.py" = ["T20"]
 "cases/*.py" = ["T20"]
 "validation/*.py" = ["T20"]
@@ -144,7 +144,7 @@ select = [
 # `from cases.markers import ...` as a third-party package and sorts the corpus
 # imports away from the ones beside them. tests/conftest.py is what puts the
 # root on sys.path.
-known-first-party = ["cases", "compile_check", "validation"]
+known-first-party = ["cases", "torch_compile_check", "validation"]
 
 [tool.mypy]
 # PLAN.md "Engineering decisions": mypy strict over the package, not over tests

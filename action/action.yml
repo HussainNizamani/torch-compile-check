@@ -1,9 +1,9 @@
-name: "compile-check"
+name: "torch-compile-check"
 description: >-
   Differential testing for torch.compile in CI: run your model's declared
   entrypoints under eager and every compiled backend, catch the numerics,
   aliasing, metadata, and gradient bugs compilation can silently introduce,
-  and fail the job on the categories you choose. Installs compile-check,
+  and fail the job on the categories you choose. Installs torch-compile-check,
   runs it against the targets you list, writes a job-summary row per target
   with its stage verdict, and uploads the JSON results. See docs/action.md
   for the full inputs/outputs reference.
@@ -14,7 +14,7 @@ branding:
   color: "blue"
 
 # PLAN.md "GitHub Action": a composite action published from action/. Inputs
-# and outputs mirror the compile-check CLI surface (src/compile_check/cli.py)
+# and outputs mirror the torch-compile-check CLI surface (src/torch_compile_check/cli.py)
 # one to one, so the mapping never needs its own separate documentation.
 inputs:
   targets:
@@ -90,25 +90,25 @@ inputs:
       Path to write the combined JSON results to. Also exposed as the
       json-path output.
     required: false
-    default: "compile-check-results.json"
+    default: "torch-compile-check-results.json"
   extra-args:
     description: "Extra arguments appended verbatim to every invocation."
     required: false
     default: ""
   ref:
     description: >-
-      Git ref of HussainNizamani/compile-check to install from, until the
+      Git ref of HussainNizamani/torch-compile-check to install from, until the
       package is on PyPI.
     required: false
     default: "main"
   source:
     description: >-
-      Where to install compile-check from: "auto" (default) installs from
+      Where to install torch-compile-check from: "auto" (default) installs from
       the checked-out source when the action runs inside this repo (its
-      parent directory has a pyproject.toml declaring compile-check), else
+      parent directory has a pyproject.toml declaring torch-compile-check), else
       falls back to "git"; "local" forces the checked-out-source install
       (`pip install $GITHUB_ACTION_PATH/..`); "git" forces
-      `pip install git+https://github.com/HussainNizamani/compile-check@ref`
+      `pip install git+https://github.com/HussainNizamani/torch-compile-check@ref`
       (needed by external consumers once the repo is public or the package
       is on PyPI, since pip cannot clone a private repo without
       credentials).
@@ -123,7 +123,7 @@ inputs:
       step does not fail) instead of an error, so a workflow pinned to a
       pre-M1-3 `ref` does not red every job in a consuming repository. A
       `ref` at or after M1-3 (including the default, `main`) never takes
-      this path -- `compile-check <target>` runs for real and exits 0, 1,
+      this path -- `torch-compile-check <target>` runs for real and exits 0, 1,
       or 2 on its own terms. Default false: an unimplemented run is a real
       failure, since a green job that checked nothing is worse than a red
       one that says so.
@@ -134,7 +134,7 @@ outputs:
   exit-code:
     description: >-
       The worst exit code across all targets (0 clean, 1 finding, 2 tool
-      error; see src/compile_check/cli.py exit codes).
+      error; see src/torch_compile_check/cli.py exit codes).
     value: ${{ steps.run.outputs.exit-code }}
   json-path:
     description: "Path to the combined JSON results file."
@@ -164,7 +164,7 @@ runs:
       run: |
         set -euo pipefail
         slug() { printf '%s' "$1" | tr -c '[:alnum:]._-' '-'; }
-        prefix="compile-check-pip-$(slug "$OS")-$(slug "$ARCH")-py$(slug "$PYTHON_VERSION")-"
+        prefix="torch-compile-check-pip-$(slug "$OS")-$(slug "$ARCH")-py$(slug "$PYTHON_VERSION")-"
         {
           echo "prefix=${prefix}"
           echo "key=${prefix}torch-$(slug "$TORCH")"
@@ -206,7 +206,7 @@ runs:
             ;;
         esac
 
-    - name: Install compile-check
+    - name: Install torch-compile-check
       shell: bash
       env:
         SOURCE: ${{ inputs.source }}
@@ -218,7 +218,7 @@ runs:
         mode="$SOURCE"
         if [ "$mode" = "auto" ]; then
           if [ -f "$repo_root/pyproject.toml" ] \
-            && grep -q 'name = "compile-check"' "$repo_root/pyproject.toml"; then
+            && grep -q 'name = "torch-compile-check"' "$repo_root/pyproject.toml"; then
             mode="local"
           else
             mode="git"
@@ -230,7 +230,7 @@ runs:
             python -m pip install "$repo_root"
             ;;
           git)
-            python -m pip install "git+https://github.com/HussainNizamani/compile-check@${REF}"
+            python -m pip install "git+https://github.com/HussainNizamani/torch-compile-check@${REF}"
             ;;
           *)
             echo "::error::Unknown source '$SOURCE' (expected auto, local, or git)" >&2
@@ -243,7 +243,7 @@ runs:
     # copy that drifts (the same reason summary.sh is its own file). Every
     # input reaches it through `env:` below and nothing is interpolated into
     # the script, so a target path containing a quote cannot rewrite it.
-    - name: Run compile-check
+    - name: Run torch-compile-check
       id: run
       shell: bash
       env:

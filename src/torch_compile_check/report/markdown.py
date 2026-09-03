@@ -24,7 +24,7 @@ ran three backends would be right to stop reading.
 
 It says whether it minimized. The repro block is the target's own source,
 reduced to the statements the entry point and the inputs need
-(:mod:`compile_check.report.repro`), which is a *shorter* file and not a
+(:mod:`torch_compile_check.report.repro`), which is a *shorter* file and not a
 *smaller case*. ``--minimize`` is what makes the case smaller, and the draft
 either carries the "Minimized" section that says what was removed or says the
 flag was not passed, so a maintainer is never left to assume a reproducer is
@@ -39,13 +39,13 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from compile_check import __version__
-from compile_check.localize import MODEL, NO_REFERENCE, StageVerdict
-from compile_check.minimize import Minimization
-from compile_check.oracles import DEFAULT_GRAD_TOL_FACTOR, ORACLE_NAMES, Finding
-from compile_check.report import repro as repro_source
-from compile_check.report.pytest_case import emit, select
-from compile_check.results import RunSet
+from torch_compile_check import __version__
+from torch_compile_check.localize import MODEL, NO_REFERENCE, StageVerdict
+from torch_compile_check.minimize import Minimization
+from torch_compile_check.oracles import DEFAULT_GRAD_TOL_FACTOR, ORACLE_NAMES, Finding
+from torch_compile_check.report import repro as repro_source
+from torch_compile_check.report.pytest_case import emit, select
+from torch_compile_check.results import RunSet
 
 __all__ = ["render", "title"]
 
@@ -79,9 +79,9 @@ def render(
     """Render a run as a Markdown issue draft.
 
     Args:
-        runset: the run, from :func:`compile_check.runner.run_all`.
+        runset: the run, from :func:`torch_compile_check.runner.run_all`.
         findings: every finding the oracles produced.
-        verdict: the stage verdict, from :func:`compile_check.localize.localize`.
+        verdict: the stage verdict, from :func:`torch_compile_check.localize.localize`.
         fail_on: the ``--fail-on`` categories, for the command line the draft
             quotes: an issue whose reader cannot re-run the tool the same way is
             an issue with a repro that does not reproduce.
@@ -132,11 +132,11 @@ def title(runset: RunSet, findings: Sequence[Finding], verdict: StageVerdict) ->
         # NO_REFERENCE reuses _preamble's own phrase for the same fact.
         if verdict.eager_exception is not None:
             return (
-                f"compile-check could not compare {target}: "
+                f"torch-compile-check could not compare {target}: "
                 f"the eager reference raised {verdict.eager_exception.type}"
             )
         return (
-            f"compile-check could not compare {target}: "
+            f"torch-compile-check could not compare {target}: "
             "the run had no eager lane to compare against"
         )
 
@@ -150,7 +150,7 @@ def title(runset: RunSet, findings: Sequence[Finding], verdict: StageVerdict) ->
     )
     if raised is not None and raised.raised is not None:
         return f"[{raised.backend}] torch.compile raises {raised.raised.type} on {target}"
-    return f"compile-check found no divergence on {target}"
+    return f"torch-compile-check found no divergence on {target}"
 
 
 def _subject(finding: Finding) -> str:
@@ -168,7 +168,8 @@ def _preamble(runset: RunSet, verdict: StageVerdict, findings: Sequence[Finding]
     counted = len([finding for finding in findings if finding.severity == "fail"])
     lines = [
         "> Drafted by "
-        f"[compile-check](https://github.com/HussainNizamani/compile-check) {__version__}. "
+        "[torch-compile-check](https://github.com/HussainNizamani/torch-compile-check) "
+        f"{__version__}. "
         "The line above is the issue title; everything below is the body. "
         "Read it, check it, and edit it before filing -- the tool drafts, a person files.",
         "",
@@ -269,7 +270,7 @@ def _minimality(minimized: Minimization | None) -> str:
     section below rather than an edit to the code above.
     """
     if minimized is None:
-        return "It is the whole case: run compile-check again with `--minimize` to shrink it."
+        return "It is the whole case: run torch-compile-check again with `--minimize` to shrink it."
     if minimized.finding is None or not minimized.reproduced or not minimized.changed:
         return f"It is the whole case: `--minimize` {minimized.summary}."
     return (
@@ -327,7 +328,8 @@ def _driver(runset: RunSet, repro: repro_source.Repro) -> str:
     call = _call(repro)
     return "\n".join(
         [
-            "# compile-check ran it like this. It gives each lane its own clone of the inputs,",
+            "# torch-compile-check ran it like this. It gives each lane its own clone of the "
+            "inputs,",
             "# so rebuild them between the two calls if the target mutates what it is given.",
             f"expected = {repro.entry}{call}",
             f'actual = torch.compile({repro.entry}, backend="{lane}"){call}',
@@ -466,7 +468,7 @@ def _command(
     """The command that produced this, so a reader can run it themselves."""
     source = runset.target_source
     target = _short(source.file) if source is not None else None
-    parts = ["compile-check", target or runset.target_name]
+    parts = ["torch-compile-check", target or runset.target_name]
     parts += ["--backends", ",".join(runset.backends)]
     if runset.device != "cpu":
         parts += ["--device", runset.device]

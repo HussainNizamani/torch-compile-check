@@ -17,7 +17,7 @@ reads can be disturbed by it; :func:`_graph_health` states the rest of the
 reasoning.
 
 Torch is imported inside the functions, never at module scope, so that importing
-this module (and therefore ``compile_check.cli``) does not pay for the torch
+this module (and therefore ``torch_compile_check.cli``) does not pay for the torch
 import; a test in tests/test_cli.py enforces it.
 """
 
@@ -36,9 +36,9 @@ import traceback
 from collections.abc import Sequence
 from typing import Any
 
-from compile_check.discover import Target
-from compile_check.env import collect_environment
-from compile_check.results import (
+from torch_compile_check.discover import Target
+from torch_compile_check.env import collect_environment
+from torch_compile_check.results import (
     TRACEBACK_LINES,
     BackendResult,
     CapturedException,
@@ -63,7 +63,7 @@ __all__ = [
     "validate_device",
 ]
 
-log = logging.getLogger("compile_check")
+log = logging.getLogger("torch_compile_check")
 
 # PLAN.md "Verified API surface": torch._inductor.config.force_disable_caches
 # reads this at import time, so the CLI sets it before importing torch.
@@ -168,7 +168,7 @@ def seed_everything(seed: int) -> None:
 
     The public spelling of :func:`_seed_everything`, for the one caller that
     needs to seed *before* it has a reason to touch the runner: the CLI seeds
-    ahead of :func:`compile_check.discover.load_target`, because a target module
+    ahead of :func:`torch_compile_check.discover.load_target`, because a target module
     that builds its model at import time (``model = resnet18(weights=None)``)
     draws its weights during that import, and a seed applied afterwards cannot
     reach them. Every lane is seeded again in :func:`run_backend`, which is what
@@ -212,7 +212,7 @@ def run_all(
     """Run ``target`` under every backend in ``backends`` and record the results.
 
     Args:
-        target: what to run, from :func:`compile_check.discover.load_target`.
+        target: what to run, from :func:`torch_compile_check.discover.load_target`.
         backends: backend names in ablation-ladder order, conventionally
             ``eager`` first because it is the reference world.
         device: where the model and the inputs are placed.
@@ -223,7 +223,7 @@ def run_all(
         disable_caches: force the inductor caches off, which is the default and
             what the CLI does unless ``--allow-caches`` was passed.
         fp64: add the ``eager_fp64`` reference run of ``--fp64-oracle``. It is
-            recorded on :attr:`~compile_check.results.RunSet.fp64`, not among
+            recorded on :attr:`~torch_compile_check.results.RunSet.fp64`, not among
             the backends, and a target that cannot be run at float64 leaves it
             ``None`` rather than failing the run.
         share_module: hand every lane the same ``nn.Module`` object instead of
@@ -231,7 +231,7 @@ def run_all(
             what the copy buys and what it costs.
 
     Returns:
-        One :class:`~compile_check.results.BackendResult` per backend, in the
+        One :class:`~torch_compile_check.results.BackendResult` per backend, in the
         order given, plus the environment block. A backend that raised is a
         recorded result, not an exception out of this function.
 
@@ -320,7 +320,7 @@ def lane_module(fn: Any, *, share: bool = False) -> tuple[Any, str | None]:
 
     Public since M3-3, because the minimizer is the second caller: every
     candidate it evaluates runs two lanes of its own
-    (:func:`compile_check.minimize.reproducer`), and a minimizer that shared one
+    (:func:`torch_compile_check.minimize.reproducer`), and a minimizer that shared one
     module between them would measure the same leak this function exists to
     stop.
 
@@ -385,7 +385,7 @@ def run_fp64_reference(
         seed: reapplied before the reference run, as for every other lane.
 
     Returns:
-        A :class:`~compile_check.results.BackendResult` named
+        A :class:`~torch_compile_check.results.BackendResult` named
         :data:`FP64_BACKEND`, or ``None`` when the target could not be widened.
     """
     torch = importlib.import_module("torch")
@@ -463,7 +463,7 @@ def run_backend(
     ``torch._dynamo.explain``, and only the graph oracle reads it; the minimizer
     of M3-3 re-runs a lane once per candidate and asks for it only when the
     finding it is shrinking is a graph finding. A lane that skipped the pass
-    records :attr:`~compile_check.results.BackendResult.graph_health` as
+    records :attr:`~torch_compile_check.results.BackendResult.graph_health` as
     ``None``, which the graph oracle already reads as "not measured" rather
     than as "no graph breaks".
     """

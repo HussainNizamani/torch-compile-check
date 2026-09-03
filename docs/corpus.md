@@ -17,7 +17,7 @@ the short version plus what running it looks like today.
   in.
 - A **discovery-convention twin** (`dtype_promotion.py`,
   `alias_copyback.py`, ...): the same reproducer trimmed to a module-level
-  `model`/`fn` plus `inputs`/`get_inputs()`, so `compile-check cases/<twin>.py`
+  `model`/`fn` plus `inputs`/`get_inputs()`, so `torch-compile-check cases/<twin>.py`
   exercises the bug through the real tool. `tests/test_corpus_twins.py` runs
   every standalone script and its twin together on every test run and
   asserts they agree on exit code and stage line, so the two cannot drift
@@ -38,7 +38,7 @@ repository red.
 
 ```console
 $ python -m cases.summary
-### compile-check regression corpus -- torch 2.14.0+cpu (git 08187d9e0fba), python 3.10.12, aarch64
+### torch-compile-check regression corpus -- torch 2.14.0+cpu (git 08187d9e0fba), python 3.10.12, aarch64
 
 | Case | Issue | Oracle | Observed | Expected | Agrees |
 |---|---|---|---|---|---|
@@ -62,17 +62,17 @@ measured; when it does, the tally line says so. An entry is reused only when
 the torch build and hash, the Python version, the machine, the interpreter and
 the case file's own bytes are all unchanged, so a torch upgrade or an edited
 case is measured again rather than answered from the file. Point
-`COMPILE_CHECK_OBSERVATIONS` at another path to move it, or set it to an empty
+`TORCH_COMPILE_CHECK_OBSERVATIONS` at another path to move it, or set it to an empty
 value to switch it off:
 
 ```console
-$ COMPILE_CHECK_OBSERVATIONS= python -m cases.summary   # always re-run everything
+$ TORCH_COMPILE_CHECK_OBSERVATIONS= python -m cases.summary   # always re-run everything
 ```
 
 A single twin through the actual CLI, for comparison:
 
 ```console
-$ compile-check cases/dtype_promotion.py
+$ torch-compile-check cases/dtype_promotion.py
 findings
   metadata  (1 fail)
     [fail] inductor output[0]

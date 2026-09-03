@@ -77,7 +77,7 @@ Two things are deliberately not in it. There is no timestamp: PLAN.md
 "Cross-architecture parity is a feature" makes parity in v1 "running the tool on
 two machines and diffing the two JSON files", and a field that differs on every
 run for no reason makes that diff worse. And there is no ``compare`` support
-here: a first-class ``compile-check compare a.json b.json`` subcommand is v0.2,
+here: a first-class ``torch-compile-check compare a.json b.json`` subcommand is v0.2,
 so v1 emits the artifact and leaves the diffing to ``diff``.
 
 Validation is hand-rolled, in :func:`validate`, because PLAN.md "Engineering
@@ -97,17 +97,17 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from compile_check import __version__
-from compile_check.localize import StageVerdict
-from compile_check.minimize import Minimization
-from compile_check.oracles import DEFAULT_GRAD_TOL_FACTOR, ORACLE_NAMES, SEVERITIES, Finding
-from compile_check.oracles.graph import summarise_reason
-from compile_check.results import BackendResult, CapturedException, GraphHealth, RunSet
-from compile_check.runner import FP64_BACKEND
+from torch_compile_check import __version__
+from torch_compile_check.localize import StageVerdict
+from torch_compile_check.minimize import Minimization
+from torch_compile_check.oracles import DEFAULT_GRAD_TOL_FACTOR, ORACLE_NAMES, SEVERITIES, Finding
+from torch_compile_check.oracles.graph import summarise_reason
+from torch_compile_check.results import BackendResult, CapturedException, GraphHealth, RunSet
+from torch_compile_check.runner import FP64_BACKEND
 
 __all__ = ["SCHEMA_VERSION", "build", "dump", "validate"]
 
-log = logging.getLogger("compile_check")
+log = logging.getLogger("torch_compile_check")
 
 SCHEMA_VERSION = 2
 """Bumped on any incompatible field change, per PLAN.md "Reports".
@@ -148,9 +148,9 @@ def build(
     """Build the JSON document for one run.
 
     Args:
-        runset: the run, from :func:`compile_check.runner.run_all`.
+        runset: the run, from :func:`torch_compile_check.runner.run_all`.
         findings: every finding the oracles produced.
-        verdict: the stage verdict, from :func:`compile_check.localize.localize`.
+        verdict: the stage verdict, from :func:`torch_compile_check.localize.localize`.
         fail_on: the ``--fail-on`` categories that decided the exit code.
         grad_tol_factor: ``--grad-tol-factor``, recorded for the same reason the
             terminal report prints it: a clean grad row means a different thing
@@ -181,7 +181,7 @@ def build(
     source = runset.target_source
     return {
         "schema_version": SCHEMA_VERSION,
-        "tool": {"name": "compile-check", "version": __version__},
+        "tool": {"name": "torch-compile-check", "version": __version__},
         "target": {
             "name": runset.target_name,
             "file": source.file if source is not None else None,
@@ -472,7 +472,7 @@ def _minimized(minimized: Minimization | None) -> dict[str, Any] | None:
     The finding is written as its identity rather than as a copy of the entry in
     ``findings``: an artifact that carried the same message twice would leave a
     consumer diffing one against the other, and the identity is exactly what
-    :func:`compile_check.minimize.finding_key` kept alive through every
+    :func:`torch_compile_check.minimize.finding_key` kept alive through every
     candidate.
     """
     if minimized is None:
