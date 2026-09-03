@@ -76,7 +76,7 @@ was given on the command line — never a path resolved through the machine
 that ran the tool. This is a fix, not a new field: earlier builds always
 wrote the fully resolved path, which is how a contributor's absolute home
 directory ended up in the per-target JSONs under `validation/results/`
-(normalised 2026-09-03, [validation.md](validation.md#cross-architecture-runs)).
+(normalised 2026-09-03, [cross-arch.md](cross-arch.md#cross-architecture-results-2026-09-03)).
 
 ## Markdown — `--md REPORT.MD`
 
