@@ -86,9 +86,10 @@ milestone lands):
 $ pip install git+https://github.com/HussainNizamani/torch-compile-check.git
 ```
 
-That command works once this repository is public; it is private today, so
-a collaborator with access clones it and runs `pip install -e .` instead.
-Once torch-compile-check ships to PyPI:
+That command works: this repository has been public since 2026-09-03. The
+PyPI upload is what's still pending, which is why it is the first install
+path here rather than the block below. Once torch-compile-check ships to
+PyPI:
 
 ```console
 $ pip install torch-compile-check

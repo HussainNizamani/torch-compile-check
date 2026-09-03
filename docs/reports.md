@@ -41,7 +41,7 @@ length; the field names and shapes are exactly what shipped):
 {
   "schema_version": 2,
   "tool": {"name": "torch-compile-check", "version": "0.1.0"},
-  "target": {"name": "dtype_promotion:fn", "file": ".../cases/dtype_promotion.py", "entry": "fn", "inputs": "inputs"},
+  "target": {"name": "dtype_promotion:fn", "file": "cases/dtype_promotion.py", "entry": "fn", "inputs": "inputs"},
   "environment": {"torch_version": "2.14.0+cpu", "machine": "aarch64", "cuda_available": false, "...": "..."},
   "run": {"device": "cpu", "seed": 0, "backends": ["eager", "aot_eager", "inductor"], "...": "..."},
   "backends": [{"backend": "eager", "reference": false, "ok": true, "...": "..."}, "..."],
@@ -69,6 +69,14 @@ and the torch version and git hash — the fields
 `--minimize` was not passed on this run; see
 [usage.md's minimizer section](usage.md#the-minimizer) for a run where it
 is not.
+
+`target.file` (above, `"cases/dtype_promotion.py"`) is relative to the
+working directory when the target lives under it, and otherwise exactly what
+was given on the command line — never a path resolved through the machine
+that ran the tool. This is a fix, not a new field: earlier builds always
+wrote the fully resolved path, which is how a contributor's absolute home
+directory ended up in the per-target JSONs under `validation/results/`
+(normalised 2026-09-03, [cross-arch.md](cross-arch.md#cross-architecture-results-2026-09-03)).
 
 ## Markdown — `--md REPORT.MD`
 

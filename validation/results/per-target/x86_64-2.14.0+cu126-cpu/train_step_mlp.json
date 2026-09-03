@@ -6,7 +6,7 @@
   },
   "target": {
     "name": "train_step_mlp:model",
-    "file": "/home/hussainnizamani/torch-compile-check/validation/targets/train_step_mlp.py",
+    "file": "validation/targets/train_step_mlp.py",
     "entry": "model",
     "inputs": "get_inputs"
   },

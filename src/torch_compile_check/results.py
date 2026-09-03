@@ -104,8 +104,15 @@ class TargetSource:
     """
 
     file: str | None
-    """The target's ``__file__``, for a report to name. ``None`` for a module
-    with no file, e.g. one built in memory."""
+    """Where a report should say the target came from. ``None`` for a module
+    with no file, e.g. one built in memory.
+
+    Not the target's raw ``__file__``: relative to the working directory when
+    the target lives under it, otherwise exactly what the caller typed, never
+    a resolved path through a machine's home directory nobody asked to see
+    (:func:`torch_compile_check.discover._display_file`). ``resolve()`` is
+    still what discovery uses to import and read the file; only what gets
+    written here changed."""
 
     text: str | None
     """The file's source, verbatim. ``None`` when it could not be read."""

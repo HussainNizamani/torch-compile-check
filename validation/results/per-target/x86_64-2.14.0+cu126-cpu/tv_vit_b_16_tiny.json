@@ -6,7 +6,7 @@
   },
   "target": {
     "name": "tv_vit_b_16_tiny:model",
-    "file": "/home/hussainnizamani/torch-compile-check/validation/targets/tv_vit_b_16_tiny.py",
+    "file": "validation/targets/tv_vit_b_16_tiny.py",
     "entry": "model",
     "inputs": "inputs"
   },
