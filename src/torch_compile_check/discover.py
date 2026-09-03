@@ -166,6 +166,14 @@ def _display_file(resolved: Path, given: str) -> str:
     loader -- a target has to be found regardless of the working directory --
     and wrong for a report, which is why the two are kept apart: this is the
     only place a report's path comes from *resolved* rather than from *given*.
+
+    *given* is ``path_or_module`` from :func:`load_target`, so this reads the
+    same way for a target named as a dotted module (:func:`_import_dotted`):
+    *resolved* is still the module's own ``__file__``, made relative to the
+    working directory when it lives under it, and otherwise the dotted name
+    exactly as given -- never that module's resolved absolute path either,
+    which for an installed package is a site-packages path through whichever
+    environment ran the tool.
     """
     try:
         return str(resolved.relative_to(Path.cwd()))

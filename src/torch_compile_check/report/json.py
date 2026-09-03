@@ -70,7 +70,11 @@ lives under it (``"validation/targets/tv_resnet18.py"``), otherwise exactly
 what was given on the command line -- never a path resolved through whichever
 machine happened to run the tool, which is what a committed
 ``validation/results/`` artifact used to carry before this was fixed
-(:func:`torch_compile_check.discover._display_file`). That is a change to the
+(:func:`torch_compile_check.discover._display_file`). A target named as a
+dotted module rather than a file reads the same way: the module's own file
+relative to the working directory when it lives under it, otherwise the
+dotted name exactly as given, never that module's resolved absolute path (a
+site-packages path, for an installed package). That is a change to the
 *value* the field carries, not to its shape or its place in the document, so
 ``schema_version`` does not move for it the way it did for ``minimized``.
 

@@ -179,3 +179,18 @@ def test_target_file_given_as_a_relative_path_outside_the_cwd_is_not_resolved(
     assert target.source is not None
     assert target.source.file == given
     assert not Path(target.source.file).is_absolute()
+
+
+def test_target_file_for_a_dotted_module_outside_the_cwd_is_the_given_name(monkeypatch, tmp_path):
+    # The dotted-module counterpart of the two cases above: outside the cwd,
+    # the display value is exactly the dotted name the caller gave -- never
+    # the module's resolved __file__, which for fn_target here would be a
+    # path through this checkout's own tests/fixtures/, and for an installed
+    # package would be a resolved site-packages path.
+    monkeypatch.syspath_prepend(str(FIXTURES))
+    monkeypatch.chdir(tmp_path)
+
+    target = load_target("fn_target")
+
+    assert target.source is not None
+    assert target.source.file == "fn_target"

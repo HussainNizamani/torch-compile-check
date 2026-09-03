@@ -359,8 +359,10 @@ points at stay.
 Once `pip install torch-compile-check` genuinely works, four things in the repository
 stop being true and should be fixed in one small pull request:
 
-- `CHANGELOG.md`: change `## [Unreleased] → 0.1.0` to `## [0.1.0] - YYYY-MM-DD`
-  and start a fresh empty `## [Unreleased]` above it.
+- `CHANGELOG.md`: the dated `## [0.1.0] - YYYY-MM-DD` heading and the empty
+  `## [Unreleased]` above it were already set in release prep, ahead of the
+  tag (see step 0) -- check the date against the day the tag actually
+  happened and correct it if release day slipped past release prep.
 - `README.md` "Quick start": the `pip install git+https://...` paragraph and
   the sentence about the repository being private are both obsolete; the
   `pip install torch-compile-check` block becomes the first one.
