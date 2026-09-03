@@ -199,6 +199,77 @@ $ rm -rf /tmp/cc-pypi
 
 ---
 
+## 5b. Trusted Publishing (no token)
+
+An alternative to steps 4 and 5 above: `.github/workflows/publish.yml`, triggered
+by pushing a tag, instead of a maintainer running `twine upload` by hand. It
+uses PyPI's Trusted Publishing, where GitHub's own OIDC token stands in for the
+account- or project-scoped token of step 5 — no token exists anywhere, not in a
+secret, not on this machine, not in shell history.
+
+### One-time setup, before the first tagged push
+
+**On PyPI** — and, separately, on TestPyPI; the two are different accounts with
+different project registries, so this whole flow runs twice:
+
+1. Sign in at `https://pypi.org` (and, separately, `https://test.pypi.org`).
+2. Account → Publishing → "Add a new pending publisher".
+3. Fill in:
+   - **PyPI project name**: `torch-compile-check` — the name `pyproject.toml`'s
+     `name =` field carries once the m4-5-rename slice merges. If a release
+     ever has to happen before that lands, register whatever `name =` says at
+     the time instead; the registered project name and the built package's
+     name have to match exactly, or the upload job fails.
+   - **Owner**: `HussainNizamani`
+   - **Repository name**: `torch-compile-check`
+   - **Workflow name**: `publish.yml`
+   - **Environment name**: `pypi` on pypi.org, `testpypi` on test.pypi.org
+
+This does **not** require the repository to be public. GitHub issues the OIDC
+token from a private repository the same as it does from a public one, and
+PyPI checks the token's claims — owner, repository, workflow file, environment
+— against the pending-publisher record above, not against the repository's
+visibility. That record has to exist before the first run, on both PyPI and
+TestPyPI, or the corresponding upload job fails with "no matching pending
+publisher" or equivalent.
+
+**On GitHub**: Settings → Environments → `pypi` (create it if it does not
+exist yet) → Required reviewers, and again for `testpypi`. Name whoever should
+see and approve the upload before it runs. Without a required reviewer an
+environment auto-approves the moment the job reaches it, and a tag push
+publishes with nobody in the loop — decide the reviewer list before the first
+tag, not after.
+
+### How the flow runs
+
+```console
+$ git tag v0.1.0 && git push origin v0.1.0
+```
+
+Pushing a `v*` tag is what starts it. (`workflow_dispatch` also runs the
+`build` job, for rebuilding the artifact on its own, but `publish-testpypi`
+only runs `if: github.event_name == 'push'`, and `publish-pypi` needs
+`publish-testpypi` — so a manual dispatch never uploads anywhere.) From there:
+
+1. `build`: checks out the tag, runs `python -m build` and `twine check dist/*`
+   — the same commands as step 1 above — and uploads `dist/` as a workflow
+   artifact.
+2. `publish-testpypi`: downloads that artifact and uploads it to TestPyPI,
+   under the `testpypi` environment — gated on that environment's required
+   reviewers, if any were configured. `skip-existing: true` so re-running the
+   same tag does not fail on a filename TestPyPI already has.
+3. `publish-pypi`: waits on the `pypi` environment's required reviewers — this
+   is the manual approval step; the job sits queued until someone with access
+   clicks Approve on the workflow run's page — then uploads the same artifact
+   to PyPI.
+
+**Visible to others:** the same as steps 4 and 5 above, once each job actually
+uploads — a public TestPyPI project page, then a public, permanent PyPI page.
+The workflow run itself, and who approved `publish-pypi`, are visible to
+anyone who can see this repository's Actions tab.
+
+---
+
 ## 6. The public flip
 
 Making the repository public is a separate decision from shipping the package,
