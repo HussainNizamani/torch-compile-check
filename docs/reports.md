@@ -5,10 +5,10 @@ None is written unless its flag is passed; see [usage.md](usage.md#artifacts)
 for the flags. All three below are from the same real run:
 
 ```console
-$ compile-check cases/dtype_promotion.py --json out.json --md draft.md --emit-test test_case.py
-compile-check: wrote out.json (--json)
-compile-check: wrote draft.md (--md)
-compile-check: wrote test_case.py (--emit-test)
+$ torch-compile-check cases/dtype_promotion.py --json out.json --md draft.md --emit-test test_case.py
+torch-compile-check: wrote out.json (--json)
+torch-compile-check: wrote draft.md (--md)
+torch-compile-check: wrote test_case.py (--emit-test)
 ```
 
 ## JSON — `--json OUT.JSON`
@@ -17,7 +17,7 @@ The CI-consumable artifact, and the unit of cross-architecture comparison
 (PLAN.md "Cross-architecture parity is a feature", [cross-arch.md](cross-arch.md)).
 `schema_version` is a top-level integer, bumped on any incompatible field
 change; the authoritative schema is the docstring at the top of
-[`src/compile_check/report/json.py`](../src/compile_check/report/json.py),
+[`src/torch_compile_check/report/json.py`](../src/torch_compile_check/report/json.py),
 which `build()` implements and `validate()` enforces by hand (torch stays
 the package's only runtime dependency, so the schema does not earn
 `jsonschema`). `dump()` refuses to write a document that fails its own
@@ -40,7 +40,7 @@ length; the field names and shapes are exactly what shipped):
 ```json
 {
   "schema_version": 2,
-  "tool": {"name": "compile-check", "version": "0.1.0"},
+  "tool": {"name": "torch-compile-check", "version": "0.1.0"},
   "target": {"name": "dtype_promotion:fn", "file": ".../cases/dtype_promotion.py", "entry": "fn", "inputs": "inputs"},
   "environment": {"torch_version": "2.14.0+cpu", "machine": "aarch64", "cuda_available": false, "...": "..."},
   "run": {"device": "cpu", "seed": 0, "backends": ["eager", "aot_eager", "inductor"], "...": "..."},
@@ -84,7 +84,7 @@ tool drafts; a person reads it, edits it, and files it. From the same run:
 ```markdown
 # [inductor] torch.compile changes the output dtype of cases/dtype_promotion.py
 
-> Drafted by [compile-check](https://github.com/HussainNizamani/compile-check) 0.1.0. The line above is the issue title; everything below is the body. Read it, check it, and edit it before filing -- the tool drafts, a person files.
+> Drafted by [torch-compile-check](https://github.com/HussainNizamani/torch-compile-check) 0.1.0. The line above is the issue title; everything below is the body. Read it, check it, and edit it before filing -- the tool drafts, a person files.
 
 `dtype_promotion:fn` was run under eager and `aot_eager`, `inductor` on the environment at the bottom of this report. The oracles reported 1 finding, all of them fail-severity. First diverges at inductor, which implicates inductor lowering/codegen.
 
@@ -103,11 +103,11 @@ That is where the divergence becomes observable, not necessarily where the fix b
 ...
 ## How this was produced
 
-$ compile-check cases/dtype_promotion.py --backends eager,aot_eager,inductor --fail-on numerics,alias,metadata,grad
+$ torch-compile-check cases/dtype_promotion.py --backends eager,aot_eager,inductor --fail-on numerics,alias,metadata,grad
 ```
 
 Three things the draft deliberately does not do, from
-[`report/markdown.py`](../src/compile_check/report/markdown.py)'s own
+[`report/markdown.py`](../src/torch_compile_check/report/markdown.py)'s own
 docstring: it adds no AI-disclosure line (whether and how a person discloses
 tooling on an issue they file under their own name is theirs to decide, not
 the tool's); it never says "the bug is in `<stage>`", only "first diverges

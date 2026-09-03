@@ -20,8 +20,8 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from compile_check.oracles.alias import AliasOracle
-from compile_check.oracles.base import (
+from torch_compile_check.oracles.alias import AliasOracle
+from torch_compile_check.oracles.base import (
     DEFAULT_GRAD_TOL_FACTOR,
     SEVERITIES,
     Baseline,
@@ -31,11 +31,11 @@ from compile_check.oracles.base import (
     OracleConfig,
     Severity,
 )
-from compile_check.oracles.grad import GradOracle
-from compile_check.oracles.graph import GraphOracle
-from compile_check.oracles.metadata import MetadataOracle
-from compile_check.oracles.numerics import NumericsOracle
-from compile_check.results import BackendResult
+from torch_compile_check.oracles.grad import GradOracle
+from torch_compile_check.oracles.graph import GraphOracle
+from torch_compile_check.oracles.metadata import MetadataOracle
+from torch_compile_check.oracles.numerics import NumericsOracle
+from torch_compile_check.results import BackendResult
 
 __all__ = [
     "DEFAULT_GRAD_TOL_FACTOR",
@@ -79,7 +79,7 @@ def run_oracles(
         other: the lane under test.
         cfg: the run's tolerances and flags.
         names: restrict to these categories; unknown or not-yet-implemented
-            names are skipped, since :func:`compile_check.cli.parse_fail_on` is
+            names are skipped, since :func:`torch_compile_check.cli.parse_fail_on` is
             where a typo is reported. ``None`` runs every implemented oracle.
 
     Returns:

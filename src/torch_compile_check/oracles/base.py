@@ -6,8 +6,8 @@ differ in what they compare and agree on everything else, and this module is the
 everything else: the record one divergence produces, the knobs a run passes
 down, and the one method the report and the localizer call.
 
-Two rules from :mod:`compile_check.results` hold here as well. Nothing imports
-torch, so ``compile_check.cli`` can name the oracle registry without paying for
+Two rules from :mod:`torch_compile_check.results` hold here as well. Nothing imports
+torch, so ``torch_compile_check.cli`` can name the oracle registry without paying for
 the torch import; tensors are therefore typed ``Any`` and every torch call lives
 inside an oracle's own lazily imported function. And a :class:`Finding` is data:
 its ``details`` carry strings, numbers, and lists rather than live tensors, so
@@ -22,7 +22,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, runtime_checkable
 
-from compile_check.results import BackendResult
+from torch_compile_check.results import BackendResult
 
 __all__ = [
     "DEFAULT_GRAD_TOL_FACTOR",
@@ -36,7 +36,7 @@ __all__ = [
     "align_outputs",
 ]
 
-log = logging.getLogger("compile_check")
+log = logging.getLogger("torch_compile_check")
 
 # What the grad oracle multiplies the numerics tolerances by, and why the
 # number is a flag rather than a constant.
@@ -102,7 +102,7 @@ class Finding:
     """One divergence, in the form every report renders and the CLI counts."""
 
     oracle: str
-    """The oracle that produced it, one of :data:`compile_check.oracles.ORACLE_NAMES`."""
+    """The oracle that produced it, one of :data:`torch_compile_check.oracles.ORACLE_NAMES`."""
 
     backend: str
     """The lane compared against eager, e.g. ``"inductor"``."""
@@ -135,7 +135,7 @@ class BaselineEntry:
 
     Summaries rather than Dynamo's full explanations: a baseline is a file
     humans read in a diff, and the identity is what the comparison is made on.
-    :func:`compile_check.oracles.graph.summarise_reason` is the one place a
+    :func:`torch_compile_check.oracles.graph.summarise_reason` is the one place a
     reason becomes one of these, so the writer and the comparison cannot drift.
     """
 
@@ -208,7 +208,7 @@ class OracleConfig:
 
     Duplicated from the run rather than read off it, for the same reason
     :attr:`grad` is: an oracle is handed two lane records and this config, never
-    the :class:`~compile_check.results.RunSet`. The graph oracle needs it
+    the :class:`~torch_compile_check.results.RunSet`. The graph oracle needs it
     because a graph break is informational when nobody asked for one graph and a
     broken promise when somebody did.
     """
@@ -262,7 +262,7 @@ def align_outputs(
     being written twice and worded differently.
 
     A lane that raised is not a divergence this function reports. The exception
-    is already on the :class:`~compile_check.results.BackendResult`, PLAN.md
+    is already on the :class:`~torch_compile_check.results.BackendResult`, PLAN.md
     "Stage localization" is what reads it, and turning it into a finding per
     oracle would report one failure three times.
 

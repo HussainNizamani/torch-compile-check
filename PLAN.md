@@ -1,4 +1,4 @@
-# compile-check
+# torch-compile-check
 Version: v0.1 (draft for Chairman review)
 Date: 2026-09-02
 Author: Aesop (CEO) for Hussain Nizamani
@@ -7,7 +7,7 @@ Planning document only. No implementation code exists yet.
 
 ## Positioning
 
-Bring your own model; compile-check tells you whether torch.compile changed its
+Bring your own model; torch-compile-check tells you whether torch.compile changed its
 answers, and if so hands you a minimal repro and a ready-to-file report.
 
 The tool is a one-command trust auditor for `torch.compile`. The user points it at
@@ -15,7 +15,7 @@ a model or a function together with real inputs. It runs the same callable under
 eager, `aot_eager`, and `inductor`, then reports whether compilation silently
 changed the result.
 
-`torch.compile` is a compiler. compile-check is differential testing for it, in the
+`torch.compile` is a compiler. torch-compile-check is differential testing for it, in the
 same sense that Csmith is differential testing for GCC and LLVM, with the difference
 that the program under test is the user's own model rather than a generated one.
 
@@ -51,7 +51,7 @@ below, because a tool that uses eager as its oracle could not have found it.
 | Distributions crossed with compile, validation branches diverge | issues 194593, 194596 | reproduced, root caused | numerics, graph |
 | CPU inductor miscompile, wrong values with no error | issue 190765 | reproduced, root caused | numerics |
 
-Name availability: `compile-check` is free on PyPI as of 2026-09-02. `torchcheck` is
+Name availability: `torch-compile-check` is free on PyPI as of 2026-09-02. `torchcheck` is
 taken.
 
 ## Relationship to PyTorch's built-in tools
@@ -76,11 +76,11 @@ numerics only; they work at the FX graph level rather than at your source; the
 minifier can fail to isolate; there is no unified pass or fail across aliasing, dtype,
 stride, and gradients; and none of it is in your CI.
 
-compile-check productizes the workflow the PyTorch team does by hand (ablate backends,
+torch-compile-check productizes the workflow the PyTorch team does by hand (ablate backends,
 compare, minify, file) into one command with five checks, moved from "after you
 noticed" to "before you merged". The adjacent third-party work is random-graph
 research fuzzing (NNSmith and similar) and an academic bug-study corpus, which
-generate synthetic graphs; compile-check audits the model the user already has.
+generate synthetic graphs; torch-compile-check audits the model the user already has.
 
 ## Verified API surface
 
@@ -123,7 +123,7 @@ per-dtype defaults behind `assert_close` are, as measured: float16 rtol 1e-3 ato
 ## CLI surface for v1
 
 ```
-compile-check path/to/file.py [options]
+torch-compile-check path/to/file.py [options]
 ```
 
 | Flag | Meaning |
@@ -258,10 +258,10 @@ report it as a plain value mismatch.
 #### The oracle blind spot
 
 Eager is the reference, so any bug that lives in eager is invisible to this tool. If
-eager and compiled agree on the wrong answer, compile-check reports clean. This is
+eager and compiled agree on the wrong answer, torch-compile-check reports clean. This is
 stated plainly here and in the README, because a testing tool that hides its own blind
 spot is worse than one that does not exist. Concretely: the author's PR 192667 (linalg
-second-order forward AD) is an eager autograd bug, and compile-check could not have
+second-order forward AD) is an eager autograd bug, and torch-compile-check could not have
 found it.
 
 The partial mitigation, borrowed from `benchmarks/dynamo/common.py`, is an optional
@@ -484,7 +484,7 @@ CI on GitHub Actions, CPU only, with a matrix over torch stable and torch nightl
 Tooling: ruff for lint and format, mypy in strict mode over the package (not over
 tests or cases), pytest for tests, pre-commit wiring all three.
 
-Repository `HussainNizamani/compile-check`, personal account, public. MIT license
+Repository `HussainNizamani/torch-compile-check`, personal account, public. MIT license
 unless the Chairman prefers BSD-3. Semantic versioning with `CHANGELOG.md`,
 `CONTRIBUTING.md`, and a code of conduct.
 
@@ -513,7 +513,7 @@ need, and not before.
 ### Cross-architecture parity is a feature
 
 Running the same model on ARM and on x86 and comparing the results is a deliberate
-compile-check capability, not an accident of where we happen to develop. Compile bugs
+torch-compile-check capability, not an accident of where we happen to develop. Compile bugs
 do not present identically across architectures. Issue 191837 is the worked example:
 the same defect aborted the process on x86, three runs out of three, while on ARM it
 silently corrupted about 99.5 percent of the output. A user who tested on one
@@ -524,7 +524,7 @@ Two consequences for the design. The report's environment block must always carr
 architecture, alongside the torch version and git hash; a run whose provenance is
 ambiguous is not usable as parity evidence. And the JSON schema is what makes the
 comparison possible, since parity in v1 means running the tool on two machines and
-diffing the two JSON files. A first-class `compile-check compare a.json b.json`
+diffing the two JSON files. A first-class `torch-compile-check compare a.json b.json`
 subcommand is v0.2.
 
 This is also a selling point. No existing tool answers "does my model compile to the
@@ -534,7 +534,7 @@ that question whether or not they have phrased it.
 ## Package layout
 
 ```
-src/compile_check/
+src/torch_compile_check/
   cli.py                 argparse surface, exit codes
   discover.py            entry and input resolution
   runner.py              seeding, cloning, reset, per-backend execution
@@ -564,11 +564,11 @@ Estimates assume one implementer plus one verifier, in working days.
 
 | Milestone | Contents | Definition of done | Days |
 |---|---|---|---|
-| M0 | scaffold, pyproject, package skeleton, CI workflow, ruff, mypy strict, pre-commit | CI green on the empty package across the full Python and torch matrix; `compile-check --version` runs | 2 |
-| M1 | runner, numerics oracle, metadata oracle, stage localization, terminal report | `compile-check cases/dtype_promotion.py` runs all three backends and prints a per-oracle table naming check and stage; a known-bad case reports a finding, a clean case reports none | 5 |
+| M0 | scaffold, pyproject, package skeleton, CI workflow, ruff, mypy strict, pre-commit | CI green on the empty package across the full Python and torch matrix; `torch-compile-check --version` runs | 2 |
+| M1 | runner, numerics oracle, metadata oracle, stage localization, terminal report | `torch-compile-check cases/dtype_promotion.py` runs all three backends and prints a per-oracle table naming check and stage; a known-bad case reports a finding, a clean case reports none | 5 |
 | M2 | alias and mutation oracle, gradients oracle, regression corpus with version markers | all five corpus cases present; every oracle has a positive and a negative test; test suite green on stable and nightly | 6 |
 | M3 | graph health oracle with baseline support, minimizer v1 including submodule delta debugging, JSON and Markdown reports, regression test emitter | a finding produces a stubbed model, a shrunk input, a stage verdict, a Markdown draft with a runnable repro, and an inductor-suite-style test method; JSON validates against the committed schema | 6 |
-| M4 | GitHub Action with baseline, cache, and budget inputs; docs; README with terminal capture and validation table; v0.1.0 to PyPI | action runs green in a demo repository and fails correctly on a seeded regression; validation table filled with real numbers; `pip install compile-check` works from PyPI | 5 |
+| M4 | GitHub Action with baseline, cache, and budget inputs; docs; README with terminal capture and validation table; v0.1.0 to PyPI | action runs green in a demo repository and fails correctly on a seeded regression; validation table filled with real numbers; `pip install torch-compile-check` works from PyPI | 5 |
 
 Total: 24 working days to v0.1.0. Add one day to M1 if the Chairman puts the fp64
 oracle in v0.1 rather than v0.2.
@@ -578,7 +578,7 @@ oracle in v0.1 rather than v0.2.
 User-source-line attribution in the minimizer, so a finding points at a line in the
 user's file rather than at a node in an FX graph. This is the differentiator against
 every existing tool and is why it is not attempted in v1. Our own FX graph delta
-debugging, replacing the handoff-only path. A `compile-check compare a.json b.json`
+debugging, replacing the handoff-only path. A `torch-compile-check compare a.json b.json`
 subcommand, making cross-architecture parity a first-class command rather than a
 manual diff of two JSON files. A dynamic shapes matrix rather than a single optional
 pass. Custom operator and higher-order-operator awareness, since a
@@ -617,7 +617,7 @@ The gate for calling v0.1.0 public.
 
 | Decision | Options | Recommendation |
 |---|---|---|
-| Final name | `compile-check`, or an alternative | `compile-check`, free on PyPI as of 2026-09-02 |
+| Final name | `torch-compile-check`, or an alternative | `torch-compile-check`, free on PyPI as of 2026-09-02 |
 | License | MIT, BSD-3 | MIT, unless matching PyTorch's BSD-3 matters for upstream optics |
 | Repository home | personal account, new organization | personal account, the upstream track record is the credential and it is attached to the person |
 | Python floor | 3.10, 3.9 | 3.10, since 3.9 is end of life and torch 2.4 already requires 3.8 or later |

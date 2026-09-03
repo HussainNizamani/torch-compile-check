@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased] → 0.1.0
 
+This project was named `compile-check` through M4-3; the `### Changed` entry
+below is the M4-5 rename to `torch-compile-check`. Everything else in this
+section is written under whichever name was current at the time it landed,
+which is `compile-check` for every slice before M4-5.
+
 Everything below is what ships as `0.1.0` — PLAN.md "M4"'s definition of
 done for this milestone — once it is tagged; the tag, the PyPI upload, and
 the Marketplace listing are a maintainer's own release step, not something
@@ -351,6 +356,26 @@ own numbering for the rest), in merge order.
   `action.yml` into a file that `tests/test_action_run.py` executes, the same
   split `summary.sh` already had.
 
+### Changed
+
+- **M4-5**: renamed the project, before the `v0.1.0` tag -- distribution,
+  repository, console script, and import package are now all
+  `torch-compile-check` (formerly `compile-check`), one name for all four.
+  `pyproject.toml`'s `name` and `[project.urls]`, the console script entry
+  (`torch-compile-check = "torch_compile_check.cli:main"`), the import
+  package (`src/compile_check` moved to `src/torch_compile_check`, every
+  `import`/`:mod:` reference in `src`, `tests`, `cases`, `validation`,
+  `action/run.sh`, and the docs updated with it), the CLI's own `argparse`
+  program name and every printed `torch-compile-check: ...` prefix,
+  `--version`, the Action's name and description in `action/action.yml` and
+  `action/README.md`, the job-summary title in `action/run.sh`, the
+  observation-cache environment variable (`COMPILE_CHECK_OBSERVATIONS` to
+  `TORCH_COMPILE_CHECK_OBSERVATIONS`) and file prefix in `cases/summary.py`,
+  the JSON report's `tool.name`, the Markdown draft's "Drafted by" line, and
+  the wheel/sdist names in `docs/release.md`. Nothing about the tool's
+  behaviour changed. The GitHub repository itself is renamed separately, by
+  the maintainer, after this merges; GitHub redirects the old URL.
+
 ### Fixed
 
 - The Action's "Run compile-check" step no longer dies on the first target it
@@ -429,4 +454,4 @@ own numbering for the rest), in merge order.
   call, so a gradient and an output are compared by the same code and the
   same tolerances (M2-2).
 
-[Unreleased]: https://github.com/HussainNizamani/compile-check/commits/main
+[Unreleased]: https://github.com/HussainNizamani/torch-compile-check/commits/main

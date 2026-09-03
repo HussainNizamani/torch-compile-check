@@ -1,4 +1,4 @@
-"""191449 as a compile-check target: two outputs collapsed into one object.
+"""191449 as a torch-compile-check target: two outputs collapsed into one object.
 
 Issue: https://github.com/pytorch/pytorch/issues/191449 -- PLAN.md "alias"
 names this as the bug the alias oracle exists for: ``base = x + 1; return
@@ -19,7 +19,7 @@ standalone RED/GREEN script that FINDINGS.md keys on, driven by its own
 ``main()`` and exercising the fuller ``resize_()`` shape that shows the
 consequence. This file is the plain identity-collapse reproducer written to
 the discovery convention of PLAN.md, a module-level ``fn`` and ``inputs``, so
-that ``compile-check cases/alias_noop_view.py`` catches the bug by itself
+that ``torch-compile-check cases/alias_noop_view.py`` catches the bug by itself
 through the alias oracle's object-identity check -- which is exactly the
 ``_identity_probe()`` helper embedded in the standalone script, promoted to
 its own file because discovery needs a module-level ``fn``, not a nested one.

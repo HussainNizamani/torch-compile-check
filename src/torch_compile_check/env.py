@@ -11,7 +11,7 @@ does the torch we are running against still have the private APIs the oracles
 lean on.
 
 Both functions import torch lazily, so importing this module (and therefore
-``compile-check --version``) does not pay for the torch import. Nothing here
+``torch-compile-check --version``) does not pay for the torch import. Nothing here
 touches the network.
 """
 
@@ -23,7 +23,7 @@ import platform
 from pathlib import Path
 from typing import Any
 
-log = logging.getLogger("compile_check")
+log = logging.getLogger("torch_compile_check")
 
 _MISSING = object()
 

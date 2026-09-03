@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from compile_check.report.repro import extract
-from compile_check.results import TargetSource
+from torch_compile_check.report.repro import extract
+from torch_compile_check.results import TargetSource
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CASES = REPO_ROOT / "cases"

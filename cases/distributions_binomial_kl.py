@@ -1,5 +1,5 @@
-"""194593 as a compile-check target: a `fullgraph=True` capturability break,
-honest about the two different answers `compile-check` gives depending on
+"""194593 as a torch-compile-check target: a `fullgraph=True` capturability break,
+honest about the two different answers `torch-compile-check` gives depending on
 `--fullgraph`.
 
 Issue: https://github.com/pytorch/pytorch/issues/194593 (sibling:
@@ -15,19 +15,19 @@ for the same bug: a standalone RED/GREEN script that FINDINGS.md keys on,
 driven by its own `main()` and running both the default and `fullgraph=True`
 modes itself for the context probe. This file is the same reproducer
 written to the discovery convention of PLAN.md, a module-level `fn` and
-`inputs`, so that `compile-check cases/distributions_binomial_kl.py` runs it
+`inputs`, so that `torch-compile-check cases/distributions_binomial_kl.py` runs it
 through the tool itself -- but the tool only takes one `--fullgraph` value
 per invocation, so this file's contract is stated for both.
 
 Two expectations, both measured on torch `2.14.0+cpu` (git `08187d9`,
 aarch64, CPU-only, caches disabled), and both are the point of this twin:
 
-- `compile-check cases/distributions_binomial_kl.py` (default,
+- `torch-compile-check cases/distributions_binomial_kl.py` (default,
   `fullgraph=False`): the branch graph-breaks and Dynamo falls back to
   eager for that piece, so every backend still returns the correct answer.
   Exit 0, clean, no findings -- this is the honest "no bug visible here"
   reading a caller gets by default.
-- `compile-check cases/distributions_binomial_kl.py --fullgraph`: Dynamo
+- `torch-compile-check cases/distributions_binomial_kl.py --fullgraph`: Dynamo
   cannot capture the branch at all, so `aot_eager` and `inductor` both raise
   during compilation rather than returning a divergent value. A lane that
   raised while eager did not is exit 1 regardless of `--fail-on` (PLAN.md

@@ -18,7 +18,7 @@ compiled lane is wrong" and "both lanes are imprecise", and it is the first
 question a reviewer asks about a tool that treats eager as ground truth.
 
 Torch is imported inside the functions, never at module scope, so that importing
-``compile_check.oracles`` (which ``cli.py`` does) does not pay for it.
+``torch_compile_check.oracles`` (which ``cli.py`` does) does not pay for it.
 """
 
 from __future__ import annotations
@@ -29,8 +29,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from compile_check.oracles.base import Finding, OracleConfig, Severity, align_outputs
-from compile_check.results import BackendResult
+from torch_compile_check.oracles.base import Finding, OracleConfig, Severity, align_outputs
+from torch_compile_check.results import BackendResult
 
 __all__ = [
     "FALLBACK_TOLERANCES",
@@ -40,7 +40,7 @@ __all__ = [
     "resolve_tolerances",
 ]
 
-log = logging.getLogger("compile_check")
+log = logging.getLogger("torch_compile_check")
 
 # PLAN.md "Verified API surface", measured against the installed wheel: the
 # per-dtype defaults behind assert_close. Used only when
@@ -81,7 +81,7 @@ def resolve_tolerances(
         cfg: the run configuration holding the overrides.
         factor: scales both tolerances, last, after the overrides. The grad
             oracle passes ``cfg.grad_tol_factor`` here
-            (:data:`~compile_check.oracles.base.DEFAULT_GRAD_TOL_FACTOR`); every
+            (:data:`~torch_compile_check.oracles.base.DEFAULT_GRAD_TOL_FACTOR`); every
             other caller leaves it at 1. Applied after the overrides on purpose:
             it is a property of what is being compared, not of what the user
             asked for, so ``--atol 1e-6 --grad-tol-factor 10`` compares
@@ -103,7 +103,7 @@ def resolve_tolerances(
 class Mismatch:
     """Why two tensors did not compare equal, in the words a report prints.
 
-    Not a :class:`~compile_check.oracles.base.Finding`: it carries no oracle
+    Not a :class:`~torch_compile_check.oracles.base.Finding`: it carries no oracle
     name, no backend, and no output index, because the caller is what knows
     those. It is the value comparison's answer, and whichever oracle asked turns
     it into a finding of its own.

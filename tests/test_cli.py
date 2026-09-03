@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from compile_check import __version__
-from compile_check.cli import (
+from torch_compile_check import __version__
+from torch_compile_check.cli import (
     EXIT_ERROR,
     EXIT_FINDING,
     EXIT_OK,
@@ -23,35 +23,35 @@ from compile_check.cli import (
     main,
     parse_fail_on,
 )
-from compile_check.env import PROBED_APIS
-from compile_check.oracles import DEFAULT_GRAD_TOL_FACTOR, Finding
-from compile_check.report.terminal import DEFAULT_MAX_FINDINGS
-from compile_check.results import BackendResult, RunSet
+from torch_compile_check.env import PROBED_APIS
+from torch_compile_check.oracles import DEFAULT_GRAD_TOL_FACTOR, Finding
+from torch_compile_check.report.terminal import DEFAULT_MAX_FINDINGS
+from torch_compile_check.results import BackendResult, RunSet
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 CASES = REPO_ROOT / "cases"
 
 PACKAGE_MODULES = [
-    "compile_check.cli",
-    "compile_check.discover",
-    "compile_check.env",
-    "compile_check.localize",
-    "compile_check.minimize",
-    "compile_check.oracles",
-    "compile_check.oracles.alias",
-    "compile_check.oracles.grad",
-    "compile_check.oracles.graph",
-    "compile_check.oracles.metadata",
-    "compile_check.oracles.numerics",
-    "compile_check.report",
-    "compile_check.report.json",
-    "compile_check.report.markdown",
-    "compile_check.report.pytest_case",
-    "compile_check.report.repro",
-    "compile_check.report.terminal",
-    "compile_check.results",
-    "compile_check.runner",
+    "torch_compile_check.cli",
+    "torch_compile_check.discover",
+    "torch_compile_check.env",
+    "torch_compile_check.localize",
+    "torch_compile_check.minimize",
+    "torch_compile_check.oracles",
+    "torch_compile_check.oracles.alias",
+    "torch_compile_check.oracles.grad",
+    "torch_compile_check.oracles.graph",
+    "torch_compile_check.oracles.metadata",
+    "torch_compile_check.oracles.numerics",
+    "torch_compile_check.report",
+    "torch_compile_check.report.json",
+    "torch_compile_check.report.markdown",
+    "torch_compile_check.report.pytest_case",
+    "torch_compile_check.report.repro",
+    "torch_compile_check.report.terminal",
+    "torch_compile_check.results",
+    "torch_compile_check.runner",
 ]
 
 
@@ -59,7 +59,7 @@ def test_version_prints_version(capsys):
     with pytest.raises(SystemExit) as excinfo:
         main(["--version"])
     assert excinfo.value.code == 0
-    assert capsys.readouterr().out.strip() == f"compile-check {__version__}"
+    assert capsys.readouterr().out.strip() == f"torch-compile-check {__version__}"
 
 
 def test_version_matches_pyproject():
@@ -84,7 +84,7 @@ def test_probe_exits_zero_and_prints_one_row_per_api(capsys):
 def test_probe_warns_that_report_flags_are_ignored(capsys, flag):
     assert main(["--probe", flag, "out"]) == EXIT_OK
     captured = capsys.readouterr()
-    assert captured.err.strip() == f"compile-check: {flag} ignored with --probe"
+    assert captured.err.strip() == f"torch-compile-check: {flag} ignored with --probe"
     assert captured.out.startswith("api")
 
 
@@ -112,7 +112,7 @@ def test_no_arguments_exits_two_with_the_usage(capsys):
     assert main([]) == EXIT_ERROR
     err = capsys.readouterr().err
     assert "needs a target" in err
-    assert "usage: compile-check" in err
+    assert "usage: torch-compile-check" in err
 
 
 def test_full_v1_flag_surface_parses():
@@ -233,7 +233,7 @@ def test_no_module_is_a_stub_any_more():
     # it is a search rather than a call because there is no stub left to call.
     stubs = sorted(
         str(path.relative_to(REPO_ROOT))
-        for path in (REPO_ROOT / "src" / "compile_check").rglob("*.py")
+        for path in (REPO_ROOT / "src" / "torch_compile_check").rglob("*.py")
         if "raise NotImplementedError" in path.read_text(encoding="utf-8")
     )
     assert stubs == []
@@ -245,7 +245,7 @@ def test_importing_the_package_does_not_import_torch():
         [
             sys.executable,
             "-c",
-            "import sys, compile_check.cli; print('torch' in sys.modules)",
+            "import sys, torch_compile_check.cli; print('torch' in sys.modules)",
         ],
         capture_output=True,
         text=True,
@@ -255,12 +255,12 @@ def test_importing_the_package_does_not_import_torch():
 
 
 def test_console_script_is_installed():
-    script = Path(sys.executable).parent / "compile-check"
+    script = Path(sys.executable).parent / "torch-compile-check"
     if not script.exists():  # pragma: no cover - non-editable or non-venv install
         pytest.skip(f"console script not found at {script}")
     completed = subprocess.run([str(script), "--version"], capture_output=True, text=True)
     assert completed.returncode == 0
-    assert completed.stdout.strip() == f"compile-check {__version__}"
+    assert completed.stdout.strip() == f"torch-compile-check {__version__}"
 
 
 def test_run_only_is_hidden_from_help():
@@ -409,7 +409,7 @@ def test_run_only_rejects_cuda_when_torch_reports_none(capsys):
 
 
 def test_run_only_turns_an_unexpected_error_into_a_tool_error(capsys, monkeypatch):
-    from compile_check import runner as runner_module
+    from torch_compile_check import runner as runner_module
 
     def boom(*args, **kwargs):
         raise ValueError("something the tool did not expect")
@@ -423,7 +423,7 @@ def test_run_only_turns_an_unexpected_error_into_a_tool_error(capsys, monkeypatc
 
 
 def test_a_multi_line_error_is_reported_on_one_line(capsys, monkeypatch):
-    from compile_check import runner as runner_module
+    from torch_compile_check import runner as runner_module
 
     def boom(*args, **kwargs):
         raise RuntimeError("first line\nsecond line\nthird line")
@@ -462,7 +462,7 @@ def test_the_main_path_reports_a_clean_model_and_exits_zero(capsys):
     out = capsys.readouterr().out
 
     assert code == EXIT_OK
-    assert out.startswith(f"compile-check {__version__}   target mlp:model")
+    assert out.startswith(f"torch-compile-check {__version__}   target mlp:model")
     assert "clean: no backend diverged from eager across 1 lane" in out
     assert "findings\n  none" in out
     # The environment block a parity comparison needs (PLAN.md
@@ -509,7 +509,7 @@ def test_a_backend_that_really_raised_exits_one_whatever_fail_on_says(capsys):
     # does not depend on an op that happens to be broken on some torch.
     # Importing it here is what puts the name in the registry before the CLI
     # validates --backends.
-    from compile_check.discover import import_target_module
+    from torch_compile_check.discover import import_target_module
 
     fixture = FIXTURES / "compile_only_raises.py"
     backend = import_target_module(str(fixture)).BACKEND
@@ -547,7 +547,7 @@ def test_a_backend_the_target_registers_survives_a_cold_run(tmp_path):
     # not exist until discovery imports the target, and validating --backends
     # before that rejected a backend that was about to exist -- as exit 2, a
     # tool error, where the truth is a compiled lane that raised, exit 1.
-    from compile_check.discover import import_target_module
+    from torch_compile_check.discover import import_target_module
 
     fixture = FIXTURES / "compile_only_raises.py"
     backend = import_target_module(str(fixture)).BACKEND
@@ -557,7 +557,7 @@ def test_a_backend_the_target_registers_survives_a_cold_run(tmp_path):
         [
             sys.executable,
             "-m",
-            "compile_check.cli",
+            "torch_compile_check.cli",
             str(fixture),
             "--backends",
             f"eager,{backend}",
@@ -580,7 +580,7 @@ def test_fail_on_grad_drives_the_exit_code_on_a_backward_only_divergence(capsys)
     # runs the traced graph unchanged and raises in the backward, so the only
     # divergence in the report is a grad one. It fails the run when grad is a
     # --fail-on category and not otherwise, and it is a finding either way.
-    from compile_check.discover import import_target_module
+    from torch_compile_check.discover import import_target_module
 
     fixture = FIXTURES / "backward_raises.py"
     backend = import_target_module(str(fixture)).BACKEND
@@ -636,7 +636,7 @@ def test_a_backend_nothing_registers_is_still_a_tool_error(tmp_path):
         [
             sys.executable,
             "-m",
-            "compile_check.cli",
+            "torch_compile_check.cli",
             str(FIXTURES / "mlp.py"),
             "--backends",
             "eager,inducter",
@@ -672,7 +672,7 @@ def test_a_synthetic_divergence_exits_one_and_names_the_stage(capsys, monkeypatc
     # divergence is injected at the one seam that matters here: an oracle that
     # reports. Everything downstream -- localization, the report, the exit code
     # -- is the real thing.
-    from compile_check import oracles as oracles_module
+    from torch_compile_check import oracles as oracles_module
 
     class AlwaysFails:
         name = "metadata"
@@ -704,7 +704,7 @@ def test_a_synthetic_divergence_exits_one_and_names_the_stage(capsys, monkeypatc
 
 
 def test_fail_on_decides_the_exit_code_without_narrowing_the_report(capsys, monkeypatch):
-    from compile_check import oracles as oracles_module
+    from torch_compile_check import oracles as oracles_module
 
     class AlwaysFails:
         name = "metadata"
@@ -747,8 +747,8 @@ def test_fail_on_decides_the_exit_code_without_narrowing_the_report(capsys, monk
 def test_a_compiled_lane_that_raised_exits_one_whatever_fail_on_says(capsys, monkeypatch):
     # A lane that could not run is not a lane that passed, and an exception
     # belongs to no oracle category, so --fail-on cannot switch this off.
-    from compile_check import runner as runner_module
-    from compile_check.results import CapturedException
+    from torch_compile_check import runner as runner_module
+    from torch_compile_check.results import CapturedException
 
     real_run_backend = runner_module.run_backend
 
@@ -992,7 +992,7 @@ def test_color_always_paints_and_never_does_not(capsys):
 
 
 def test_color_auto_follows_the_terminal_and_no_color(monkeypatch):
-    from compile_check.cli import _use_color
+    from torch_compile_check.cli import _use_color
 
     monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
@@ -1009,7 +1009,7 @@ def test_color_auto_follows_the_terminal_and_no_color(monkeypatch):
 
 
 def test_max_findings_caps_each_oracle_group(capsys, monkeypatch):
-    from compile_check import oracles as oracles_module
+    from torch_compile_check import oracles as oracles_module
 
     class ThreeFailures:
         name = "metadata"
@@ -1053,7 +1053,7 @@ def test_the_cache_variable_is_set_before_the_run_and_recorded_in_the_report(cap
     # process torch is already imported by the time a test runs, so what is
     # asserted here is that main() sets the variable and that the report says
     # which mode was in force.
-    from compile_check.runner import CACHE_ENV_VAR
+    from torch_compile_check.runner import CACHE_ENV_VAR
 
     monkeypatch.delenv(CACHE_ENV_VAR, raising=False)
     assert main([str(FIXTURES / "mlp.py"), "--backends", "eager", "--color", "never"]) == EXIT_OK
@@ -1070,7 +1070,7 @@ def test_a_negative_max_findings_is_a_tool_error(capsys):
 
 
 def test_max_findings_zero_counts_without_printing(capsys, monkeypatch):
-    from compile_check import oracles as oracles_module
+    from torch_compile_check import oracles as oracles_module
 
     class OneFailure:
         name = "metadata"
@@ -1115,7 +1115,7 @@ def test_a_fresh_process_disables_the_caches_before_torch_is_imported(tmp_path):
     # first import torch the config would read False and the report would say
     # so. PLAN.md "Runner semantics": verified that setting the variable makes
     # torch._inductor.config.force_disable_caches read True.
-    from compile_check.runner import CACHE_ENV_VAR
+    from torch_compile_check.runner import CACHE_ENV_VAR
 
     env = dict(os.environ)
     env.pop(CACHE_ENV_VAR, None)
@@ -1124,7 +1124,7 @@ def test_a_fresh_process_disables_the_caches_before_torch_is_imported(tmp_path):
         [
             sys.executable,
             "-m",
-            "compile_check.cli",
+            "torch_compile_check.cli",
             str(FIXTURES / "mlp.py"),
             "--backends",
             "eager",
@@ -1141,7 +1141,7 @@ def test_a_fresh_process_disables_the_caches_before_torch_is_imported(tmp_path):
 
 
 def test_allow_caches_leaves_the_variable_alone_and_the_report_says_so(tmp_path):
-    from compile_check.runner import CACHE_ENV_VAR
+    from torch_compile_check.runner import CACHE_ENV_VAR
 
     env = dict(os.environ)
     env.pop(CACHE_ENV_VAR, None)
@@ -1150,7 +1150,7 @@ def test_allow_caches_leaves_the_variable_alone_and_the_report_says_so(tmp_path)
         [
             sys.executable,
             "-m",
-            "compile_check.cli",
+            "torch_compile_check.cli",
             str(FIXTURES / "mlp.py"),
             "--backends",
             "eager",
@@ -1174,8 +1174,8 @@ def test_allow_caches_leaves_the_variable_alone_and_the_report_says_so(tmp_path)
 # shapes rather than values.
 _SEED_PROBE = """
 import hashlib
-from compile_check.cli import main
-from compile_check.discover import load_target
+from torch_compile_check.cli import main
+from torch_compile_check.discover import load_target
 
 path = {path!r}
 code = main([path, "--backends", "eager", "--seed", "{seed}", "--color", "never"])
@@ -1439,7 +1439,7 @@ def test_md_says_the_eager_reference_raised_not_a_compiled_lane(capsys, tmp_path
     assert code == EXIT_ERROR
     draft = path.read_text()
 
-    assert draft.startswith("# compile-check could not compare")
+    assert draft.startswith("# torch-compile-check could not compare")
     assert "the eager reference raised RuntimeError" in draft
     assert "raised where eager did not" not in draft
     assert "torch.compile raises" not in draft
@@ -1495,7 +1495,7 @@ def test_md_says_no_eager_lane_when_none_ran(capsys, tmp_path):
     assert code == EXIT_ERROR
     draft = path.read_text()
 
-    assert draft.startswith("# compile-check could not compare")
+    assert draft.startswith("# torch-compile-check could not compare")
     assert "the run had no eager lane to compare against" in draft
     assert "raised where eager did not" not in draft
     assert "torch.compile raises" not in draft
@@ -1546,7 +1546,7 @@ def test_a_report_that_cannot_be_written_is_a_tool_error_after_the_report(capsys
 
 
 def test_the_json_written_by_a_real_run_validates_and_round_trips(tmp_path):
-    from compile_check.report.json import validate
+    from torch_compile_check.report.json import validate
 
     path = tmp_path / "out.json"
     assert main([str(FIXTURES / "mlp.py"), "--backends", "eager", "--json", str(path)]) == EXIT_OK
@@ -1560,7 +1560,7 @@ def test_the_json_written_by_a_real_run_validates_and_round_trips(tmp_path):
 # --- the minimizer, end to end ---------------------------------------------
 
 DIVERGENT = FIXTURES / "divergent_child.py"
-PERTURBS = "compile_check_perturbs"
+PERTURBS = "torch_compile_check_perturbs"
 
 
 def test_minimize_on_a_clean_run_prints_the_block_and_says_there_is_nothing(capsys):
@@ -1605,7 +1605,7 @@ def test_minimize_does_not_move_the_verdict_or_the_exit_code(capsys):
     minimized_out = capsys.readouterr().out
 
     assert plain == minimized == EXIT_FINDING
-    stage = "first diverges at compile_check_perturbs"
+    stage = "first diverges at torch_compile_check_perturbs"
     assert stage in plain_out
     assert stage in minimized_out
     assert "numerics  (1 fail)" in minimized_out
@@ -1656,7 +1656,7 @@ def test_a_budget_that_expires_prints_the_partial_marker(capsys):
 
 
 def test_the_three_artifacts_carry_the_minimization(tmp_path):
-    from compile_check.report.json import validate
+    from torch_compile_check.report.json import validate
 
     code = main(
         [

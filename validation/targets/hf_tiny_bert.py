@@ -6,10 +6,10 @@ layer norm, and an embedding lookup as the first op rather than a
 convolution. ``transformers`` is a validation-only extra (see
 ``docs/validation.md``), not a ``pyproject.toml`` dependency, so this file
 is not always importable; ``validation/run.py`` checks for the package
-before invoking ``compile-check`` on this target at all, and reports the
+before invoking ``torch-compile-check`` on this target at all, and reports the
 target as skipped rather than a tool error when it is absent, which is the
 "skip cleanly" the slice brief asks for. Run directly with
-``compile-check`` in an environment without ``transformers`` installed,
+``torch-compile-check`` in an environment without ``transformers`` installed,
 this file still fails at import (a plain ``ModuleNotFoundError``, caught by
 discovery and reported as a ``DiscoveryError``, exit 2) rather than at some
 later, more confusing point.

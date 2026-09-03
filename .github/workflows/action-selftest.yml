@@ -6,7 +6,7 @@ name: action self-test
 # Action": until M1-3 lands the CLI main path, the tool exits 2 with
 # "not implemented" on any real target, so allow-unimplemented is set here
 # and the smoke checks lean on --version/--probe/--run-only instead
-# (src/compile_check/cli.py).
+# (src/torch_compile_check/cli.py).
 
 on:
   push:
@@ -67,20 +67,20 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install torch and compile-check directly
+      - name: Install torch and torch-compile-check directly
         run: |
           python -m pip install --upgrade pip
           python -m pip install "torch>=2.4" --index-url https://download.pytorch.org/whl/cpu
           python -m pip install -e ".[dev]"
 
       - name: --version
-        run: compile-check --version
+        run: torch-compile-check --version
 
       - name: --probe
-        run: compile-check --probe
+        run: torch-compile-check --probe
 
       - name: --run-only against the reference fixture
-        run: compile-check tests/fixtures/mlp.py --run-only
+        run: torch-compile-check tests/fixtures/mlp.py --run-only
 
   selftest-baseline:
     # The baseline round trip of PLAN.md "GitHub Action", driven through the
@@ -109,7 +109,7 @@ jobs:
           targets: "tests/fixtures/graph_break.py"
           backends: "eager,aot_eager"
           fail-on: "numerics,alias,metadata,grad,graph"
-          write-baseline: ".compile-check/graph-break.json"
+          write-baseline: ".torch-compile-check/graph-break.json"
           json-out: "baseline-write.json"
           # The one place `cache: true` is exercised in CI. It is safe to put
           # it on this run and nowhere else: what this job measures is graph
@@ -131,7 +131,7 @@ jobs:
           import json
           from pathlib import Path
 
-          baseline = json.loads(Path(".compile-check/graph-break.json").read_text())
+          baseline = json.loads(Path(".torch-compile-check/graph-break.json").read_text())
           if not baseline:
               raise SystemExit("write-baseline produced an empty file")
           for lane, entry in baseline.items():
@@ -156,7 +156,7 @@ jobs:
           targets: "tests/fixtures/graph_break.py"
           backends: "eager,aot_eager"
           fail-on: "numerics,alias,metadata,grad,graph"
-          baseline: ".compile-check/graph-break.json"
+          baseline: ".torch-compile-check/graph-break.json"
           json-out: "baseline-read.json"
 
       - name: Assert the baseline silenced the known breaks
@@ -172,7 +172,7 @@ jobs:
           from pathlib import Path
 
           report = json.loads(Path("baseline-read.1.json").read_text())
-          if report["run"]["baseline"] != ".compile-check/graph-break.json":
+          if report["run"]["baseline"] != ".torch-compile-check/graph-break.json":
               raise SystemExit(f"the baseline input did not reach --baseline: {report['run']}")
           breaks = [f for f in report["findings"] if f["oracle"] == "graph"]
           if breaks:

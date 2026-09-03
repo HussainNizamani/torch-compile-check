@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The composite action's "Run compile-check" step, as a file.
+# The composite action's "Run torch-compile-check" step, as a file.
 #
 # Split out of action.yml for the reason summary.sh was (see its header): a
 # `run:` block can only be tested by copying it into a test, and the copy drifts
@@ -37,7 +37,7 @@ set -uo pipefail
 : "${GITHUB_OUTPUT:=/dev/null}"
 : "${GITHUB_ACTION_PATH:=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)}"
 
-# One variable per input of the "Run compile-check" step in action.yml. Listed
+# One variable per input of the "Run torch-compile-check" step in action.yml. Listed
 # rather than defaulted: a default here would be a second copy of action.yml's
 # defaults, and the copy that drifts is the one nobody reads. A test asserts
 # this list and that `env:` block name the same variables.
@@ -108,16 +108,16 @@ if [ -n "$WRITE_BASELINE" ] &&
 fi
 
 # The one-line reason a tool error gives, for the status cell. The CLI prints
-# every tool error as `compile-check: <sentence>` on stderr (cli.py
+# every tool error as `torch-compile-check: <sentence>` on stderr (cli.py
 # `_tool_error`), and argparse's own failures take the same shape
-# (`compile-check: error: ...`), so the last such line is the sentence a reader
+# (`torch-compile-check: error: ...`), so the last such line is the sentence a reader
 # wants. Pipes are escaped and the line is capped: the cell lives in a Markdown
 # table row, and a raw `|` there would split it into columns.
 tool_error_reason() {
 	local line
-	line="$(printf '%s\n' "$1" | grep -E '^compile-check: ' | tail -n 1)"
-	line="${line#compile-check: }"
-	# argparse writes "compile-check: error: <sentence>"; the cell already says
+	line="$(printf '%s\n' "$1" | grep -E '^torch-compile-check: ' | tail -n 1)"
+	line="${line#torch-compile-check: }"
+	# argparse writes "torch-compile-check: error: <sentence>"; the cell already says
 	# "tool error", so the second "error:" is a word of noise in a narrow column.
 	line="${line#error: }"
 	[ -n "$line" ] || return 0
@@ -129,7 +129,7 @@ tool_error_reason() {
 }
 
 index=0
-version="$(compile-check --version 2>/dev/null)"
+version="$(torch-compile-check --version 2>/dev/null)"
 [ -n "$version" ] || version="version unknown"
 # Collected during the loop and appended after the table: a <details> block per
 # target that ran the minimizer, which has to come after the rows rather than
@@ -137,7 +137,7 @@ version="$(compile-check --version 2>/dev/null)"
 minimized_sections="$(mktemp)"
 
 {
-	echo "## compile-check results ($version)"
+	echo "## torch-compile-check results ($version)"
 	echo
 	echo "| target | exit code | status | graph breaks | stage |"
 	echo "|---|---|---|---|---|"
@@ -158,7 +158,7 @@ while read -r target; do
 	# it never measured.
 	rm -f "$target_json"
 
-	args=(compile-check "$target" --backends "$BACKENDS" --fail-on "$FAIL_ON" --json "$target_json")
+	args=(torch-compile-check "$target" --backends "$BACKENDS" --fail-on "$FAIL_ON" --json "$target_json")
 	[ -n "$BASELINE" ] && args+=(--baseline "$BASELINE")
 	[ -n "$WRITE_BASELINE" ] && args+=(--write-baseline "$WRITE_BASELINE")
 	[ "$MINIMIZE" = "true" ] && args+=(--minimize)

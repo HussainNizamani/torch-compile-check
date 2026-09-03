@@ -28,7 +28,7 @@ import torch
 def fn(x: torch.Tensor) -> torch.Tensor:
     """Two graph breaks and no divergence."""
     y = x * 2
-    print("compile-check graph_break fixture")
+    print("torch-compile-check graph_break fixture")
     if y.sum() > 0:
         y = y + 1
     return y - 0.5

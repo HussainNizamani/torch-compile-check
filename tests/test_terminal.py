@@ -1,8 +1,8 @@
 """Tests for the terminal report.
 
 The report is rendered from synthetic records, not from a compiled run: it reads
-:class:`~compile_check.results.RunSet` and
-:class:`~compile_check.oracles.Finding` and nothing else, so it can be pinned
+:class:`~torch_compile_check.results.RunSet` and
+:class:`~torch_compile_check.oracles.Finding` and nothing else, so it can be pinned
 exactly without paying for a compile. The main test is a snapshot with the ANSI
 stripped, which is the only way to catch a layout change that a substring
 assertion would sail past.
@@ -14,12 +14,18 @@ import re
 
 import pytest
 
-from compile_check import __version__
-from compile_check.localize import localize
-from compile_check.minimize import Kept, Minimization, Shrink, Stub
-from compile_check.oracles import Finding
-from compile_check.report.terminal import DEFAULT_MAX_FINDINGS, render
-from compile_check.results import BackendResult, CapturedException, GraphBreak, GraphHealth, RunSet
+from torch_compile_check import __version__
+from torch_compile_check.localize import localize
+from torch_compile_check.minimize import Kept, Minimization, Shrink, Stub
+from torch_compile_check.oracles import Finding
+from torch_compile_check.report.terminal import DEFAULT_MAX_FINDINGS, render
+from torch_compile_check.results import (
+    BackendResult,
+    CapturedException,
+    GraphBreak,
+    GraphHealth,
+    RunSet,
+)
 
 ANSI = re.compile(r"\033\[[0-9;]*m")
 
@@ -123,7 +129,7 @@ def findings() -> list[Finding]:
 
 
 CLEAN_REPORT = f"""\
-compile-check {__version__}   target m:model
+torch-compile-check {__version__}   target m:model
 
 environment
   torch     2.14.0+cpu (git 08187d9e0fba)
@@ -164,7 +170,7 @@ next
 
 
 DIVERGENT_REPORT = f"""\
-compile-check {__version__}   target m:model
+torch-compile-check {__version__}   target m:model
 
 environment
   torch     2.14.0+cpu (git 08187d9e0fba)
@@ -427,9 +433,9 @@ def test_a_graph_fail_is_reported_without_naming_a_compilation_stage(runset):
 def test_the_baseline_row_appears_only_when_there_is_a_baseline(runset):
     assert "baseline" not in render(runset, [], localize(runset, []))
 
-    report = render(runset, [], localize(runset, []), baseline=".compile-check/baseline.json")
+    report = render(runset, [], localize(runset, []), baseline=".torch-compile-check/baseline.json")
     assert (
-        "baseline  .compile-check/baseline.json   (the graph oracle reports new breaks only)"
+        "baseline  .torch-compile-check/baseline.json   (the graph oracle reports new breaks only)"
         in report
     )
 

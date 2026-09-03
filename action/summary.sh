@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Job-summary rendering for the composite action in action.yml.
 #
-# Split out of the action's "Run compile-check" step rather than inlined in the
+# Split out of the action's "Run torch-compile-check" step rather than inlined in the
 # YAML so that it can be executed outside a workflow: tests/test_action_summary.py
 # runs this exact file against JSON reports the CLI has just written. A `run:`
 # block could only be tested by copying it into the test, and the copy would

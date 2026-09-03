@@ -1,7 +1,7 @@
 """torchvision's ResNet-18, random-initialized, as a validation target.
 
 PLAN.md "Real-world validation set": a public, CPU-runnable model that
-exercises compile-check on architecture shapes the fixture-sized regression
+exercises torch-compile-check on architecture shapes the fixture-sized regression
 corpus (``cases/``) does not -- residual blocks, batch norm, adaptive
 pooling. ``weights=None`` is deliberate: this suite runs offline and at
 import time, per ``validation/run.py``'s no-network rule, so every target

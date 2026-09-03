@@ -24,7 +24,7 @@ from typing import Any
 
 import torch
 
-BACKEND = "compile_check_raises"
+BACKEND = "torch_compile_check_raises"
 """The backend name to pass to ``--backends``."""
 
 MESSAGE = "this backend raises on purpose"

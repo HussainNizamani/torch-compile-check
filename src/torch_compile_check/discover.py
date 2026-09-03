@@ -29,11 +29,11 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from compile_check.results import TargetSource
+from torch_compile_check.results import TargetSource
 
 __all__ = ["DiscoveryError", "Target", "load_target"]
 
-log = logging.getLogger("compile_check")
+log = logging.getLogger("torch_compile_check")
 
 _MISSING = object()
 
@@ -171,7 +171,7 @@ def _import_from_path(path: Path) -> ModuleType:
         if _module_file(existing) == resolved:
             return existing
         # Some unrelated module already owns that name; do not shadow it.
-        name = f"_compile_check_target_{name}"
+        name = f"_torch_compile_check_target_{name}"
 
     spec = importlib.util.spec_from_file_location(name, resolved)
     if spec is None or spec.loader is None:

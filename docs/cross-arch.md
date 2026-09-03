@@ -1,6 +1,6 @@
 # Cross-architecture runbook
 
-A copy-paste runbook for running compile-check on a second machine — an x86
+A copy-paste runbook for running torch-compile-check on a second machine — an x86
 CPU box, a CUDA box — and comparing what it found against the committed
 aarch64 run. PLAN.md ["Cross-architecture parity is a
 feature"](../PLAN.md#cross-architecture-parity-is-a-feature): running the
@@ -34,7 +34,7 @@ CUDA: install the `torch` wheel matching the box's CUDA driver from
 [pytorch.org's install matrix](https://pytorch.org/get-started/locally/)
 (there is no one fixed index URL — it is versioned per CUDA release) instead
 of the CPU index above, then the same `pip install -e ".[dev]"`. Everything
-below runs unchanged; `compile-check --device cuda` and the `environment.cuda_available`
+below runs unchanged; `torch-compile-check --device cuda` and the `environment.cuda_available`
 field are the only things that differ.
 
 Validation targets (torchvision, a tiny HF BERT) need two more packages that
@@ -66,9 +66,9 @@ about what a second machine needs.)
 Confirm the install before running anything that matters:
 
 ```console
-$ compile-check --version
-compile-check 0.1.0
-$ compile-check --probe
+$ torch-compile-check --version
+torch-compile-check 0.1.0
+$ torch-compile-check --probe
 ```
 
 `--probe` (docs/usage.md) is worth reading closely on a new box: it is the
@@ -83,7 +83,7 @@ and grades it against `cases/markers.py`'s known-bad table
 
 ```console
 $ python -m cases.summary
-### compile-check regression corpus -- torch 2.14.0+cpu (git 08187d9e0fba), python 3.10.12, aarch64
+### torch-compile-check regression corpus -- torch 2.14.0+cpu (git 08187d9e0fba), python 3.10.12, aarch64
 
 | Case | Issue | Oracle | Observed | Expected | Agrees |
 |---|---|---|---|---|---|
@@ -138,16 +138,16 @@ That file does not carry `schema_version` or a `findings` array — it is
 target), built for the human-readable table in `docs/validation.md`, not for
 a schema-level diff.
 
-**Per-target compile-check JSON** is what actually carries
+**Per-target torch-compile-check JSON** is what actually carries
 `schema_version`, `environment.machine`, `environment.cuda_available`, and a
 `findings` array per PLAN.md's schema ([reports.md](reports.md)) — call
-`compile-check` directly, once per target, with `--json`:
+`torch-compile-check` directly, once per target, with `--json`:
 
 ```console
 $ mkdir -p results/aarch64
 $ for f in validation/targets/*.py; do
     name=$(basename "$f" .py)
-    compile-check "$f" --fp64-oracle --json "results/aarch64/${name}.json" || true
+    torch-compile-check "$f" --fp64-oracle --json "results/aarch64/${name}.json" || true
   done
 ```
 
@@ -159,8 +159,8 @@ per-target artifacts come from the CLI's own `--json`, run per file, into an
 architecture-named directory of your choosing. A real one, captured here:
 
 ```console
-$ compile-check validation/targets/train_step_mlp.py --json results/aarch64/train_step_mlp.json
-compile-check: wrote results/aarch64/train_step_mlp.json (--json)
+$ torch-compile-check validation/targets/train_step_mlp.py --json results/aarch64/train_step_mlp.json
+torch-compile-check: wrote results/aarch64/train_step_mlp.json (--json)
 ...
 stage
   clean: no backend diverged from eager across 2 lanes
@@ -169,7 +169,7 @@ stage
 ## 4. Diff two JSON results
 
 Compare `schema_version` first — a document written by a different
-`compile-check` version may not carry the same field set — then
+`torch-compile-check` version may not carry the same field set — then
 `environment.machine`, `environment.cuda_available`, and the `findings`
 list. A minimal script that does exactly those four things and nothing
 else (run wall time and the torch git hash are expected to differ between
@@ -229,7 +229,7 @@ findings: 0 on each side, identical set -- parity holds
 ```
 
 ```console
-$ compile-check cases/dtype_promotion.py --json results/aarch64/dtype_promotion.json
+$ torch-compile-check cases/dtype_promotion.py --json results/aarch64/dtype_promotion.json
 $ python diff_parity.py results/aarch64/train_step_mlp.json results/aarch64/dtype_promotion.json
 environment.machine: 'aarch64' vs 'aarch64' (same)
 environment.cuda_available: False vs False (same)
@@ -269,6 +269,6 @@ disagreement:
   is exactly the case a single-architecture CI run cannot catch on its own,
   since there is nothing on that one architecture to compare against.
 
-A first-class `compile-check compare a.json b.json` subcommand that
+A first-class `torch-compile-check compare a.json b.json` subcommand that
 automates the diff above is PLAN.md's v0.2 outlook; v1 is this runbook and
 the two-run-and-`diff`-the-artifacts workflow it walks through.

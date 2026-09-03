@@ -57,7 +57,7 @@ instead, once, and that is the whole disclosure.
   model. A checker that fires on everything is worse than no checker.
 - Nothing is described as working without the command output that proves it.
 - `print` belongs in `cli.py` and `report/` only; everywhere else use
-  `logging.getLogger("compile_check")`. ruff enforces this.
+  `logging.getLogger("torch_compile_check")`. ruff enforces this.
 - No network access at import time, anywhere in the package.
 - mypy runs strict over `src/`, not over tests or cases.
 - Any finding on a real model is cross-checked against eager twice before it is
@@ -65,7 +65,7 @@ instead, once, and that is the whole disclosure.
 - Path discovery mutates the running interpreter on purpose: `discover.py`
   inserts the target file's parent directory at `sys.path[0]` and registers the
   module in `sys.modules` under the file's stem (or
-  `_compile_check_target_<stem>` when that name is already taken). Both exist so
+  `_torch_compile_check_target_<stem>` when that name is already taken). Both exist so
   a two-file repro imports its sibling. Keep them; if you change either, say so
   in the README section that documents it, because it is behaviour a user can
   observe.

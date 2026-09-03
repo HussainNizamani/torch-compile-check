@@ -1,6 +1,6 @@
 """Tests for ``action/summary.sh``, the composite action's job-summary renderer.
 
-The script is what ``action/action.yml``'s "Run compile-check" step calls once
+The script is what ``action/action.yml``'s "Run torch-compile-check" step calls once
 per target, so these tests run *that file* rather than a copy of its logic, and
 they run it against JSON reports the CLI writes here, in the test, rather than
 against a stored document. A stored document would drift from the schema the
@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from compile_check.cli import EXIT_FINDING, EXIT_OK, main
+from torch_compile_check.cli import EXIT_FINDING, EXIT_OK, main
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -34,7 +34,7 @@ SUMMARY_SH = REPO_ROOT / "action" / "summary.sh"
 # needing inductor's codegen -- so no test here pays for a real compile.
 GRAPH_BREAK = FIXTURES / "graph_break.py"
 DIVERGENT = FIXTURES / "divergent_child.py"
-PERTURBS = "compile_check_perturbs"
+PERTURBS = "torch_compile_check_perturbs"
 
 
 def render(*args: str) -> str:

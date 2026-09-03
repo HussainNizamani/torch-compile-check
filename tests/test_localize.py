@@ -12,7 +12,7 @@ import logging
 
 import pytest
 
-from compile_check.localize import (
+from torch_compile_check.localize import (
     CLEAN,
     MODEL,
     NO_REFERENCE,
@@ -22,9 +22,9 @@ from compile_check.localize import (
     implicated_stage,
     localize,
 )
-from compile_check.oracles import Finding
-from compile_check.results import BackendResult, CapturedException, RunSet
-from compile_check.runner import ABLATION_LADDER
+from torch_compile_check.oracles import Finding
+from torch_compile_check.results import BackendResult, CapturedException, RunSet
+from torch_compile_check.runner import ABLATION_LADDER
 
 CAPTURE = CapturedException(
     type="RuntimeError",
@@ -247,7 +247,7 @@ def test_the_summary_counts_every_severity_per_backend():
 
 def test_a_finding_against_a_lane_that_did_not_run_is_reported_not_counted(caplog):
     runset = make_runset("eager", "inductor")
-    with caplog.at_level(logging.WARNING, logger="compile_check"):
+    with caplog.at_level(logging.WARNING, logger="torch_compile_check"):
         verdict = localize(runset, [finding("aot_eager")])
 
     assert verdict.stage == CLEAN

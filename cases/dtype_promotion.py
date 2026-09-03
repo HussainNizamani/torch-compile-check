@@ -1,4 +1,4 @@
-"""191308 as a compile-check target: int8 batched matmul, promoted to int64.
+"""191308 as a torch-compile-check target: int8 batched matmul, promoted to int64.
 
 Issue: https://github.com/pytorch/pytorch/issues/191308 -- "[Inductor][CPU]
 torch.compile changes int8 batched matmul output dtype to int64". PLAN.md
@@ -10,7 +10,7 @@ Twin file, deliberately. ``cases/dtype_int8_matmul_promotion.py`` is the C-1
 corpus entry for the same bug: a standalone RED/GREEN script that FINDINGS.md
 keys on, driven by its own ``main()``. This file is the same reproducer written
 to the discovery convention of PLAN.md, a module-level ``fn`` and ``inputs``, so
-that ``compile-check cases/dtype_promotion.py`` runs it through the tool itself
+that ``torch-compile-check cases/dtype_promotion.py`` runs it through the tool itself
 -- which the corpus script cannot be, since it exposes ``build()`` rather than
 the two module-level names discovery looks for.
 

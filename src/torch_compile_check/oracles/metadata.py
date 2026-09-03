@@ -36,12 +36,12 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from compile_check.oracles.base import Finding, OracleConfig, Severity, align_outputs
-from compile_check.results import BackendResult
+from torch_compile_check.oracles.base import Finding, OracleConfig, Severity, align_outputs
+from torch_compile_check.results import BackendResult
 
 __all__ = ["FIELDS", "MetadataOracle"]
 
-log = logging.getLogger("compile_check")
+log = logging.getLogger("torch_compile_check")
 
 _UNAVAILABLE = object()
 
@@ -73,7 +73,7 @@ class MetadataOracle:
 
         ``cfg`` is unused: metadata equality is exact, so there is no tolerance
         to apply. The parameter stays because it is the
-        :class:`~compile_check.oracles.base.Oracle` protocol.
+        :class:`~torch_compile_check.oracles.base.Oracle` protocol.
         """
         del cfg
         torch = importlib.import_module("torch")
@@ -186,7 +186,7 @@ class MetadataOracle:
 def _recorded_requires_grad(result: BackendResult, index: int) -> bool | None:
     """What the runner saw on the live output leaf, or ``None`` if it took no record.
 
-    ``None`` is what a hand-built :class:`~compile_check.results.BackendResult`
+    ``None`` is what a hand-built :class:`~torch_compile_check.results.BackendResult`
     gives, and it means "ask the tensor", not "the tensor did not require grad".
     """
     if index < len(result.output_requires_grad):

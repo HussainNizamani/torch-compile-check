@@ -36,7 +36,7 @@ CACHE_DIR_VAR = "TORCHINDUCTOR_CACHE_DIR"
 # not ours to delete.
 _OWNED_CACHE_DIR: Path | None = None
 if not os.environ.get(CACHE_DIR_VAR):
-    _OWNED_CACHE_DIR = Path(tempfile.mkdtemp(prefix="compile-check-inductor-"))
+    _OWNED_CACHE_DIR = Path(tempfile.mkdtemp(prefix="torch-compile-check-inductor-"))
     os.environ[CACHE_DIR_VAR] = str(_OWNED_CACHE_DIR)
 
 assert "torch" not in sys.modules, "conftest.py must run before torch is imported"
@@ -45,7 +45,7 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # `cases` is corpus data, not shipped code: it is deliberately outside
-# src/compile_check and so is not on the path that `pip install -e .` puts
+# src/torch_compile_check and so is not on the path that `pip install -e .` puts
 # there. The two corpus test modules read `cases.markers` for the version
 # markers and `cases.summary` for the one way to run a standalone script, so the
 # repository root goes on the path here, where it applies to every test module

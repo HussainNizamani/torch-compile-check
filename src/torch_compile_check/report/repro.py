@@ -1,7 +1,7 @@
 """The target's own source, reduced to the lines a repro needs.
 
 PLAN.md "Package layout" does not name this module, for the same reason it does
-not name :mod:`compile_check.results`: it is shared vocabulary. PLAN.md
+not name :mod:`torch_compile_check.results`: it is shared vocabulary. PLAN.md
 "Reports" wants "the minimal repro inline as a fenced Python block" in the
 Markdown draft and PLAN.md "Regression test emission" wants the same case as a
 test method, so two reports need the same answer to one question -- which lines
@@ -29,11 +29,11 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from compile_check.results import TargetSource
+from torch_compile_check.results import TargetSource
 
 __all__ = ["Repro", "extract"]
 
-log = logging.getLogger("compile_check")
+log = logging.getLogger("torch_compile_check")
 
 # The issue link a corpus case carries in its own docstring, e.g.
 # "Issue: https://github.com/pytorch/pytorch/issues/191308 -- ...". Matched
@@ -106,7 +106,7 @@ class Repro:
     """
 
     keyword_inputs: tuple[str, ...] = ()
-    """Copied from :class:`~compile_check.results.TargetSource`, so a caller
+    """Copied from :class:`~torch_compile_check.results.TargetSource`, so a caller
     that writes a call knows whether it is ``fn(*inputs)`` or ``fn(**inputs)``."""
 
     complete: bool = True
@@ -129,7 +129,7 @@ def extract(source: TargetSource | None) -> Repro | None:
 
     Args:
         source: what discovery recorded about the target, from
-            :attr:`compile_check.results.RunSet.target_source`.
+            :attr:`torch_compile_check.results.RunSet.target_source`.
 
     Returns:
         The reduced repro, or ``None`` when there is no source to reduce --

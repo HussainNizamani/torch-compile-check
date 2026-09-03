@@ -1,14 +1,14 @@
 # Usage
 
-Every flag `compile-check --help` lists, with one real example each. All
+Every flag `torch-compile-check --help` lists, with one real example each. All
 output below is verbatim from running the command in a fresh venv on
 aarch64 (torch `2.14.0+cpu`), trimmed to the section that shows what the
 flag changed — see [PLAN.md "CLI surface for v1"](../PLAN.md) for the
-design these flags implement, and run `compile-check --help` for the
+design these flags implement, and run `torch-compile-check --help` for the
 one-line form of everything here.
 
 ```console
-$ compile-check path/to/model.py [options]
+$ torch-compile-check path/to/model.py [options]
 ```
 
 `path` is a Python file following the [discovery convention](#discovery-overrides):
@@ -19,8 +19,8 @@ raised while eager did not), `2` a tool error.
 ## `--version`, `--probe`
 
 ```console
-$ compile-check --version
-compile-check 0.1.0
+$ torch-compile-check --version
+torch-compile-check 0.1.0
 ```
 
 `--probe` prints whether every torch API the oracles read (PLAN.md "Verified
@@ -28,7 +28,7 @@ API surface") is present on the installed wheel, so a torch upgrade that
 removed or renamed one shows up before a run does:
 
 ```console
-$ compile-check --probe
+$ torch-compile-check --probe
 api                                               status
 ------------------------------------------------  -------
 torch.testing.assert_close                        present
@@ -56,8 +56,8 @@ resolves too. An empty module half (just `--entry callable_name`) means
 "this file".
 
 ```console
-$ compile-check tests/fixtures/named_entry.py --entry net --inputs bundle.make_inputs
-compile-check 0.1.0   target named_entry:net
+$ torch-compile-check tests/fixtures/named_entry.py --entry net --inputs bundle.make_inputs
+torch-compile-check 0.1.0   target named_entry:net
 ...
 stage
   clean: no backend diverged from eager across 2 lanes
@@ -77,7 +77,7 @@ is an optional fourth lane, added when a finding needs the extra stage split
 between decomposition and partitioning (PLAN.md "Stage localization"):
 
 ```console
-$ compile-check tests/fixtures/mlp.py --backends eager,inductor
+$ torch-compile-check tests/fixtures/mlp.py --backends eager,inductor
 checks
   oracle    fail-on  inductor
   numerics  yes      pass
@@ -103,7 +103,7 @@ divergence looked like differently across architectures (issue
 [#191837](https://github.com/pytorch/pytorch/issues/191837)).
 
 ```console
-$ compile-check tests/fixtures/mlp.py --device cpu
+$ torch-compile-check tests/fixtures/mlp.py --device cpu
 stage
   clean: no backend diverged from eager across 2 lanes
 ```
@@ -120,7 +120,7 @@ branching inside `torch.distributions.kl`'s validation path (issue
 [#194593](https://github.com/pytorch/pytorch/issues/194593)):
 
 ```console
-$ compile-check cases/distributions_binomial_kl.py --fullgraph
+$ torch-compile-check cases/distributions_binomial_kl.py --fullgraph
 backends
   backend    outputs   first call  second call  status
   eager            1      0.0060s      0.0005s  ok
@@ -151,7 +151,7 @@ by [PR #190966](https://github.com/pytorch/pytorch/pull/190966)) is clean
 here, which is the expected result on this torch build:
 
 ```console
-$ compile-check cases/numerics_polyjuice_minmax.py --dynamic
+$ torch-compile-check cases/numerics_polyjuice_minmax.py --dynamic
 findings
   none
 
@@ -167,7 +167,7 @@ oracle reports that it did not run rather than reporting a silent pass, so
 a clean grad row never means two different things:
 
 ```console
-$ compile-check tests/fixtures/mlp.py --no-grad
+$ torch-compile-check tests/fixtures/mlp.py --no-grad
 run       backends eager, aot_eager, inductor   seed 0   fullgraph off   dynamic off   grad off
 gradients not compared (--no-grad)
 
@@ -187,7 +187,7 @@ the memory of one fewer copy of the weights, on a model too large to
 duplicate:
 
 ```console
-$ compile-check tests/fixtures/mlp.py --share-module
+$ torch-compile-check tests/fixtures/mlp.py --share-module
 run       ... module    shared across every lane (--share-module)
 findings
   none
@@ -203,8 +203,8 @@ replacing the per-dtype defaults from `torch.testing._comparison.default_toleran
 turn a finding into a pass, never the reverse:
 
 ```console
-$ compile-check tests/fixtures/mlp.py --rtol 0.5
-$ compile-check tests/fixtures/mlp.py --atol 1.0
+$ torch-compile-check tests/fixtures/mlp.py --rtol 0.5
+$ torch-compile-check tests/fixtures/mlp.py --atol 1.0
 ```
 
 Both runs stayed clean on this build, since `mlp.py` has nothing to fail
@@ -220,7 +220,7 @@ sends every gradient back through batch statistics. `1` compares gradients
 exactly as outputs are compared:
 
 ```console
-$ compile-check tests/fixtures/mlp.py --grad-tol-factor 1
+$ torch-compile-check tests/fixtures/mlp.py --grad-tol-factor 1
 gradients compared at the numerics tolerances (--grad-tol-factor 1)
 findings
   none
@@ -240,7 +240,7 @@ fp64 reference, since that is a precision note rather than a compiler
 finding:
 
 ```console
-$ compile-check tests/fixtures/mlp.py --fp64-oracle
+$ torch-compile-check tests/fixtures/mlp.py --fp64-oracle
 backends
   backend                 outputs   first call  second call  status
   eager                         1      0.0002s      0.0001s  ok
@@ -262,7 +262,7 @@ model built at module scope draws the same weights every run — and again
 before every backend:
 
 ```console
-$ compile-check tests/fixtures/mlp.py --seed 42
+$ torch-compile-check tests/fixtures/mlp.py --seed 42
 findings
   none
 ```
@@ -274,7 +274,7 @@ starts measuring whatever an earlier run cached instead of the current
 compiler; the report records which mode was in force either way:
 
 ```console
-$ compile-check tests/fixtures/mlp.py --allow-caches
+$ torch-compile-check tests/fixtures/mlp.py --allow-caches
 caches    ENABLED (force_disable_caches=False, --allow-caches)
 findings
   none
@@ -288,10 +288,10 @@ Three artifacts off one run — see [reports.md](reports.md) for the JSON
 schema and the shape of the other two:
 
 ```console
-$ compile-check cases/dtype_promotion.py --json out.json --md draft.md --emit-test test_case.py
-compile-check: wrote out.json (--json)
-compile-check: wrote draft.md (--md)
-compile-check: wrote test_case.py (--emit-test)
+$ torch-compile-check cases/dtype_promotion.py --json out.json --md draft.md --emit-test test_case.py
+torch-compile-check: wrote out.json (--json)
+torch-compile-check: wrote draft.md (--md)
+torch-compile-check: wrote test_case.py (--emit-test)
 ...
 findings
   metadata  (1 fail)
@@ -317,7 +317,7 @@ from `numerics,alias,metadata,grad,graph`; default
 never which oracles run — every oracle's row is in the report either way:
 
 ```console
-$ compile-check cases/dtype_promotion.py --fail-on metadata
+$ torch-compile-check cases/dtype_promotion.py --fail-on metadata
 findings
   metadata  (1 fail)
     [fail] inductor output[0]
@@ -326,7 +326,7 @@ findings
 Exit `1`.
 
 ```console
-$ compile-check cases/dtype_promotion.py --fail-on numerics
+$ torch-compile-check cases/dtype_promotion.py --fail-on numerics
 findings
   metadata  (1 fail)
     [fail] inductor output[0]
@@ -352,7 +352,7 @@ value, or `nan`, is a tool error naming the flag rather than a ceiling that
 is silently already spent (or silently absent).
 
 ```console
-$ compile-check cases/alias_copyback.py --minimize --budget 60
+$ torch-compile-check cases/alias_copyback.py --minimize --budget 60
 findings
   alias  (1 fail)
     [fail] inductor output[0]
@@ -383,8 +383,8 @@ relative to it, not on every break — the mode
 has two deliberate breaks:
 
 ```console
-$ compile-check tests/fixtures/graph_break.py --write-baseline baseline.json --fail-on graph
-compile-check: wrote the graph baseline baseline.json (aot_eager, inductor)
+$ torch-compile-check tests/fixtures/graph_break.py --write-baseline baseline.json --fail-on graph
+torch-compile-check: wrote the graph baseline baseline.json (aot_eager, inductor)
 findings
   graph  (4 info)
     [info] aot_eager run
@@ -394,7 +394,7 @@ Exit `0` — the breaks are new against no prior baseline, so `--write-baseline`
 records them without failing this run.
 
 ```console
-$ compile-check tests/fixtures/graph_break.py --baseline baseline.json --fail-on graph
+$ torch-compile-check tests/fixtures/graph_break.py --baseline baseline.json --fail-on graph
 run       ... baseline  baseline.json   (the graph oracle reports new breaks only)
 findings
   none
@@ -409,7 +409,7 @@ How many findings to print per oracle group, default `10`; the rest are
 counted, never dropped:
 
 ```console
-$ compile-check tests/fixtures/graph_break.py --max-findings 1 --fail-on graph
+$ torch-compile-check tests/fixtures/graph_break.py --max-findings 1 --fail-on graph
 findings
   graph  (4 info)
     [info] aot_eager run
@@ -424,8 +424,8 @@ Default `auto` — colour when stdout is a terminal and `NO_COLOR` is unset.
 above is exactly what was captured, ANSI codes included or not:
 
 ```console
-$ compile-check tests/fixtures/mlp.py --color never
-$ compile-check tests/fixtures/mlp.py --color always
+$ torch-compile-check tests/fixtures/mlp.py --color never
+$ torch-compile-check tests/fixtures/mlp.py --color always
 ```
 
 Both exit `0`; `--color always` is the one whose terminal output carries
@@ -434,7 +434,7 @@ since a fenced code block cannot show colour.
 
 ## Environment variables
 
-Two environment variables the tool itself reads, from `compile-check --help`:
+Two environment variables the tool itself reads, from `torch-compile-check --help`:
 
 - `TORCHINDUCTOR_FORCE_DISABLE_CACHES` — set to `1` by this tool before torch
   is imported, unless `--allow-caches` was passed.

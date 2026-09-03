@@ -42,16 +42,16 @@ import re
 from collections.abc import Sequence
 from typing import Any
 
-from compile_check import __version__
-from compile_check.localize import StageVerdict
-from compile_check.minimize import Minimization
-from compile_check.oracles import ORACLE_NAMES, Finding
-from compile_check.report import repro as repro_source
-from compile_check.results import RunSet
+from torch_compile_check import __version__
+from torch_compile_check.localize import StageVerdict
+from torch_compile_check.minimize import Minimization
+from torch_compile_check.oracles import ORACLE_NAMES, Finding
+from torch_compile_check.report import repro as repro_source
+from torch_compile_check.results import RunSet
 
 __all__ = ["emit", "select"]
 
-log = logging.getLogger("compile_check")
+log = logging.getLogger("torch_compile_check")
 
 _INDENT = " " * 8
 
@@ -98,7 +98,7 @@ def emit(
     """Emit the top finding as a regression test.
 
     Args:
-        runset: the run, from :func:`compile_check.runner.run_all`.
+        runset: the run, from :func:`torch_compile_check.runner.run_all`.
         findings: every finding the oracles produced.
         verdict: the stage verdict, for the case where a lane raised and left no
             finding behind to write a test from.
@@ -173,7 +173,7 @@ def _stub_lines(repro: repro_source.Repro, minimized: Minimization | None) -> li
         return []
     entry = repro.entry
     lines = [
-        f"# compile-check replaced {len(minimized.stubs)} child module"
+        f"# torch-compile-check replaced {len(minimized.stubs)} child module"
         f"{'' if len(minimized.stubs) == 1 else 's'} with a passthrough; it still reproduced."
     ]
     for stub in minimized.stubs:
@@ -242,7 +242,7 @@ def _docstring(
     """The file's own header: what it came from, and what it is not."""
     env = runset.env
     lines = [
-        f'"""Regression test drafted by compile-check {__version__}.',
+        f'"""Regression test drafted by torch-compile-check {__version__}.',
         "",
         f"Target: {repro.file or runset.target_name} ({runset.target_name})",
     ]
@@ -276,9 +276,9 @@ def _docstring(
         lines += [
             "",
             f"Minimized: {minimized.summary}.",
-            "The factory and the first statements of the method carry the reduction; the target",
-            "below is the original, so the difference between them is what compile-check showed",
-            "the finding does not need.",
+            "The factory and the first statements of the method carry the reduction; the",
+            "target below is the original, so the difference between them is what",
+            "torch-compile-check showed the finding does not need.",
         ]
     lines += [
         "",
@@ -300,7 +300,7 @@ def _factory(repro: repro_source.Repro, minimized: Minimization | None = None) -
     A minimized run writes the shrunk inputs here rather than editing the user's
     own expression, which the tool has no safe way to rewrite. The slicing goes
     through ``tree_flatten`` because that is the flattening the runner indexed
-    the leaves with (:mod:`compile_check.minimize` shrinks the same list), so
+    the leaves with (:mod:`torch_compile_check.minimize` shrinks the same list), so
     the leaf a shrink names is the leaf the test slices whatever shape the
     inputs are -- a tuple, a dict, or anything nested.
     """
@@ -318,7 +318,7 @@ def _factory(repro: repro_source.Repro, minimized: Minimization | None = None) -
     )
     lines = [
         "def make_inputs():",
-        '    """A fresh set per lane, minimized by compile-check.',
+        '    """A fresh set per lane, minimized by torch-compile-check.',
         "",
         f"    Shrunk along the leading dimension, and it still reproduced: {shrunk}.",
         '    """',
@@ -658,8 +658,8 @@ def _raised_lane(verdict: StageVerdict) -> tuple[str, str] | None:
     """The first compiled lane that raised, and the first line of why.
 
     ``None`` when there is no working eager run to have diverged from --
-    ``not verdict.compared``, PLAN.md's :data:`~compile_check.localize.MODEL`
-    (eager itself raised) and :data:`~compile_check.localize.NO_REFERENCE`
+    ``not verdict.compared``, PLAN.md's :data:`~torch_compile_check.localize.MODEL`
+    (eager itself raised) and :data:`~torch_compile_check.localize.NO_REFERENCE`
     (no eager lane ran at all) alike. A compiled lane that raised in either
     case did not diverge from anything, so "raised where eager did not" would
     be false; both are a tool error, not a finding, and there is no eager
@@ -689,7 +689,7 @@ def _class_name(runset: RunSet) -> str:
     """A class name derived from the target, for a file that runs on its own."""
     stem = _identifier(runset.target_name.partition(":")[0])
     parts = [part.capitalize() for part in stem.split("_") if part]
-    return f"Test{''.join(parts) or 'CompileCheck'}"
+    return f"Test{''.join(parts) or 'TorchCompileCheck'}"
 
 
 def _identifier(text: str) -> str:

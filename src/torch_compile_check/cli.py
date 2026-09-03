@@ -33,12 +33,12 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from compile_check import __version__
-from compile_check.discover import Target
-from compile_check.env import probe_apis
-from compile_check.localize import StageVerdict, localize
-from compile_check.minimize import MAX_STEPS, Minimization, minimize
-from compile_check.oracles import (
+from torch_compile_check import __version__
+from torch_compile_check.discover import Target
+from torch_compile_check.env import probe_apis
+from torch_compile_check.localize import StageVerdict, localize
+from torch_compile_check.minimize import MAX_STEPS, Minimization, minimize
+from torch_compile_check.oracles import (
     DEFAULT_GRAD_TOL_FACTOR,
     ORACLE_NAMES,
     ORACLES,
@@ -47,13 +47,13 @@ from compile_check.oracles import (
     OracleConfig,
     run_oracles,
 )
-from compile_check.oracles.graph import BaselineError, read_baseline, write_baseline
-from compile_check.report.terminal import DEFAULT_MAX_FINDINGS, render
-from compile_check.results import RunSet
+from torch_compile_check.oracles.graph import BaselineError, read_baseline, write_baseline
+from torch_compile_check.report.terminal import DEFAULT_MAX_FINDINGS, render
+from torch_compile_check.results import RunSet
 
-PROG = "compile-check"
+PROG = "torch-compile-check"
 
-log = logging.getLogger("compile_check")
+log = logging.getLogger("torch_compile_check")
 
 # PLAN.md "CLI surface for v1", exit codes: 0 clean, 1 at least one finding in a
 # --fail-on category, 2 tool error.
@@ -345,7 +345,7 @@ def format_probe_table(probe: Mapping[str, bool]) -> str:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Entry point for the ``compile-check`` console script."""
+    """Entry point for the ``torch-compile-check`` console script."""
     parser = build_parser()
     args = parser.parse_args(argv)
 
@@ -356,7 +356,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         # package is lazy and happens below this line, which makes main() the
         # one place early enough. The import is local for the same reason: it
         # must not be able to drag torch in at module scope.
-        from compile_check.runner import CACHE_ENV_VAR
+        from torch_compile_check.runner import CACHE_ENV_VAR
 
         os.environ[CACHE_ENV_VAR] = "1"
 
@@ -488,14 +488,14 @@ def _minimize(
     test and the minimized case are about the same divergence by construction.
 
     Returns:
-        A :class:`compile_check.minimize.Minimization`, or ``None`` when
+        A :class:`torch_compile_check.minimize.Minimization`, or ``None`` when
         ``--minimize`` was not passed. The two are different facts and every
         report keeps them apart: ``None`` prints no block, while a record with
         nothing in it says the pass ran and found nothing to reduce.
     """
     if not args.minimize:
         return None
-    from compile_check.report.pytest_case import select
+    from torch_compile_check.report.pytest_case import select
 
     finding = select(findings)
     if finding is None:
@@ -543,8 +543,8 @@ def _write_reports(
         Whether every requested file was written. A failure has already been
         reported as a one-line tool error.
     """
-    from compile_check.report import json as json_report
-    from compile_check.report import markdown, pytest_case
+    from torch_compile_check.report import json as json_report
+    from torch_compile_check.report import markdown, pytest_case
 
     baseline = cfg.baseline.path if cfg.baseline is not None else None
     written = True
@@ -611,7 +611,7 @@ def _write_text(path: Path, text: str) -> None:
 
 def _nothing_to_emit(findings: Sequence[Finding], verdict: StageVerdict) -> str:
     """Why no regression test was written, in the words the user needs."""
-    from compile_check.report.pytest_case import select
+    from torch_compile_check.report.pytest_case import select
 
     if not verdict.compared:
         # Either the reference itself raised (MODEL) or no eager lane ran at
@@ -726,7 +726,7 @@ def _guarded_run(
     imported (``torch._dynamo.register_backend``), so a cold run that refused
     the name before discovery refused a backend that was about to exist. The
     up-front pass therefore defers unknown names -- it still catches an empty
-    ``--backends`` -- and :func:`compile_check.runner.run_all` validates for
+    ``--backends`` -- and :func:`torch_compile_check.runner.run_all` validates for
     real, after the import and before anything is compiled.
 
     ``--seed`` is applied here, before ``load_target``, and again per lane
@@ -750,12 +750,12 @@ def _guarded_run(
         to stderr.
 
         The target travels out because the minimizer of M3-3 re-runs it: a
-        :class:`~compile_check.results.RunSet` is records, and a record cannot
+        :class:`~torch_compile_check.results.RunSet` is records, and a record cannot
         be called. It is the same object, already moved onto ``--device`` by the
         runner, so the candidates run where the finding was found.
     """
-    from compile_check.discover import DiscoveryError, load_target
-    from compile_check.runner import (
+    from torch_compile_check.discover import DiscoveryError, load_target
+    from torch_compile_check.runner import (
         RunnerError,
         run_all,
         seed_everything,
@@ -837,7 +837,7 @@ def parse_fail_on(spec: str) -> list[str]:
 
     Raises:
         ValueError: a category is not one of
-            :data:`compile_check.oracles.ORACLE_NAMES`.
+            :data:`torch_compile_check.oracles.ORACLE_NAMES`.
     """
     names = list(dict.fromkeys(name.strip() for name in spec.split(",") if name.strip()))
     unknown = [name for name in names if name not in ORACLE_NAMES]
@@ -925,7 +925,7 @@ def format_run_only(
     fail_on: Sequence[str] = (),
     grad_tol_factor: float = DEFAULT_GRAD_TOL_FACTOR,
 ) -> str:
-    """Render a :class:`~compile_check.results.RunSet` for the developer path."""
+    """Render a :class:`~torch_compile_check.results.RunSet` for the developer path."""
     env = runset.env
     lines = [
         f"target     {runset.target_name}",

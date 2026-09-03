@@ -11,8 +11,8 @@ repeat call. Graph breaks are not bugs; they explain why a user is not getting
 the speedup they expect. With ``--baseline FILE`` the oracle reports only new
 breaks, which is the mode the GitHub Action uses.
 
-Nothing here runs a model. :func:`compile_check.runner.run_backend` does the
-``explain`` pass and leaves a :class:`~compile_check.results.GraphHealth` on the
+Nothing here runs a model. :func:`torch_compile_check.runner.run_backend` does the
+``explain`` pass and leaves a :class:`~torch_compile_check.results.GraphHealth` on the
 lane's result; this module is the rules that read it, and it imports no torch.
 
 Four rules decide a severity, and they are the whole oracle:
@@ -45,14 +45,14 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from compile_check.oracles.base import (
+from torch_compile_check.oracles.base import (
     Baseline,
     BaselineEntry,
     Finding,
     OracleConfig,
     Severity,
 )
-from compile_check.results import BackendResult, GraphBreak, GraphHealth, RunSet
+from torch_compile_check.results import BackendResult, GraphBreak, GraphHealth, RunSet
 
 __all__ = [
     "BASELINE_COUNT_KEY",
@@ -65,7 +65,7 @@ __all__ = [
     "write_baseline",
 ]
 
-log = logging.getLogger("compile_check")
+log = logging.getLogger("torch_compile_check")
 
 # The two keys of one baseline entry, from the M3-1 brief's
 # ``{backend: {graph_break_count, break_reasons[]}}``. Named because the reader,
@@ -90,7 +90,7 @@ class BaselineError(ValueError):
     """A ``--baseline`` file that cannot be read as one.
 
     A subclass of :class:`ValueError` because that is what a malformed file is,
-    and because :mod:`compile_check.cli` turns it into the tool-error exit code
+    and because :mod:`torch_compile_check.cli` turns it into the tool-error exit code
     with the message printed as one line: a baseline that does not parse is a
     problem with the file the user named, not a crash of the run.
     """
@@ -113,10 +113,10 @@ class GraphOracle:
         the other four. They ask whether two worlds agree; this one asks what
         happened to one of them, because eager has no graphs to disagree with.
         The parameter stays because it is the
-        :class:`~compile_check.oracles.base.Oracle` protocol.
+        :class:`~torch_compile_check.oracles.base.Oracle` protocol.
 
         A lane that raised is still reported on. Every other oracle stops there
-        (:func:`~compile_check.oracles.base.align_outputs` returns nothing to
+        (:func:`~torch_compile_check.oracles.base.align_outputs` returns nothing to
         compare), and under ``--fullgraph`` that is exactly the case worth
         explaining: the lane raised *because* the graph broke.
         """
@@ -363,7 +363,7 @@ class GraphOracle:
 
         Dynamo's full explanation is deliberately not in ``details``: it is a
         dozen lines of hints per break, it is already on the lane's
-        :class:`~compile_check.results.GraphHealth` for the JSON and Markdown
+        :class:`~torch_compile_check.results.GraphHealth` for the JSON and Markdown
         reports of M3-2, and putting it here would bury five findings in one
         screen of the same three URLs.
         """
@@ -486,7 +486,7 @@ def read_baseline(path: str | Path) -> Baseline:
 
     Raises:
         BaselineError: the file is missing, is not JSON, or is not this shape --
-            which :mod:`compile_check.cli` turns into exit code 2 with the
+            which :mod:`torch_compile_check.cli` turns into exit code 2 with the
             message printed as one line.
     """
     location = Path(path)
@@ -560,7 +560,7 @@ def write_baseline(path: str | Path, runset: RunSet) -> list[str]:
     Args:
         path: the file named by ``--write-baseline``. Its parent directory is
             created, because a baseline conventionally lives in a directory of
-            its own (``.compile-check/baseline.json`` in the Action's docs) and
+            its own (``.torch-compile-check/baseline.json`` in the Action's docs) and
             failing on the first run for a missing directory helps nobody.
         runset: the run to record.
 
