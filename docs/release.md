@@ -167,8 +167,16 @@ instead of a real one.
 $ twine upload dist/*
 ```
 
-Use an API token scoped to this project (`__token__` as the username), not an
-account password.
+Use an API token as the password (`__token__` as the username), not an
+account password. The *first* upload of a new project cannot use a
+project-scoped token — PyPI cannot scope a token to a project that does not
+exist there yet — so it has to run under an account-scoped token (one that
+can publish any of the account's projects). Once this upload creates the
+`compile-check` project on PyPI, go to its own Publishing settings and mint a
+token scoped to just that project, and use that narrower one for every upload
+after this first one; then revoke or forget the account-scoped token so
+nothing keeps standing access to every other project on the account. (5b
+below replaces this token dance entirely, for the tagged-release path.)
 
 **Visible to others: permanently and to everyone.**
 `https://pypi.org/project/compile-check/` becomes a public page carrying the
