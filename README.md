@@ -1,6 +1,5 @@
 # torch-compile-check
 
-
 [![CI](https://github.com/HussainNizamani/torch-compile-check/actions/workflows/ci.yml/badge.svg)](https://github.com/HussainNizamani/torch-compile-check/actions/workflows/ci.yml)
 [![Action self-test](https://github.com/HussainNizamani/torch-compile-check/actions/workflows/action-selftest.yml/badge.svg)](https://github.com/HussainNizamani/torch-compile-check/actions/workflows/action-selftest.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -209,7 +208,7 @@ it is that none of it runs on your model, in your CI.
 
 | Existing tool | What it does | Gap for a user |
 |---|---|---|
-| `torch.library.opcheck` | checks one custom operator's schema, autograd registration, and fake-tensor kernel, then compares it against AOTAutograd under static and dynamic shapes | one operator, not a composed model; does not exercise inductor lowering; returns a pass/fail dict, not a diff report with stage localization; no minimizer; no CI report |
+| `torch.library.opcheck` | checks one custom operator's schema, autograd registration, and fake-tensor kernel, then compares it against AOTAutograd under dynamic shapes by default (static shapes only with `test_utils="ALL"`) | one operator, not a composed model; does not exercise inductor lowering; returns a pass/fail dict, not a diff report with stage localization; no minimizer; no CI report |
 | `test/inductor/test_torchinductor_opinfo.py` | OpInfo-driven eager versus compiled tests | per operator, on PyTorch's commits, not on a composed user model |
 | `benchmarks/dynamo/*.py --accuracy` | accuracy runs with an fp64 eager reference over a fixed model zoo | fixed zoo; your model is not in it |
 | `dynamo_wrapped` CI shards | reruns the PyTorch test suite under compile | PyTorch's programs, not yours |
