@@ -6,6 +6,7 @@ import importlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -1561,6 +1562,93 @@ def test_the_json_written_by_a_real_run_validates_and_round_trips(tmp_path):
 
 DIVERGENT = FIXTURES / "divergent_child.py"
 PERTURBS = "torch_compile_check_perturbs"
+
+
+# --- target.file: relative to the cwd when under it, else exactly as given --
+#
+# A path-hygiene finding on the now-public repo (Ritchie's x86 RC round):
+# discover.py resolved the target unconditionally, so every report -- and the
+# 24 committed per-target JSONs under validation/results/ -- carried a
+# contributor's absolute home directory. These run the CLI for real, from a
+# tmp cwd, and check the JSON and the emitted test both show the fixed path.
+
+
+def test_target_file_is_relative_to_the_cwd_and_the_emitted_test_still_runs(monkeypatch, tmp_path):
+    # EXECUTE-ARTIFACTS: the emitted file is run for real, in the same tmp
+    # cwd, to prove the path fix is display-only -- discovery still finds and
+    # imports the target correctly from its recorded (now relative) path.
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    shutil.copy(DIVERGENT, sub / "divergent_child.py")
+    monkeypatch.chdir(tmp_path)
+
+    code = main(
+        [
+            "sub/divergent_child.py",
+            "--backends",
+            f"eager,{PERTURBS}",
+            "--json",
+            "out.json",
+            "--emit-test",
+            "test_case.py",
+            "--color",
+            "never",
+        ]
+    )
+    assert code == EXIT_FINDING
+
+    from torch_compile_check.report.json import validate
+
+    document = json.loads(Path("out.json").read_text())
+    assert document["target"]["file"] == "sub/divergent_child.py"
+    assert validate(document) == []
+
+    emitted = Path("test_case.py").read_text()
+    assert "Target: sub/divergent_child.py" in emitted
+
+    completed = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "test_case.py"],
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+    )
+    assert completed.returncode == 1, completed.stdout + completed.stderr
+    assert "1 failed" in completed.stdout, completed.stdout
+
+
+def test_target_file_outside_the_cwd_keeps_the_absolute_path_as_given(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    given = str(DIVERGENT)
+
+    code = main(
+        [given, "--backends", f"eager,{PERTURBS}", "--json", "out.json", "--color", "never"]
+    )
+    assert code == EXIT_FINDING
+
+    document = json.loads(Path("out.json").read_text())
+    assert document["target"]["file"] == given
+
+
+def test_target_file_given_as_a_relative_path_outside_the_cwd_is_not_resolved(
+    monkeypatch, tmp_path
+):
+    # The case resolve() would get wrong: a relative path leading outside the
+    # cwd. resolve() would turn "../fixtures/divergent_child.py" into an
+    # absolute path through this machine's temp directory; the recorded path
+    # is exactly what was typed instead.
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    given = os.path.relpath(DIVERGENT, work)
+
+    code = main(
+        [given, "--backends", f"eager,{PERTURBS}", "--json", "out.json", "--color", "never"]
+    )
+    assert code == EXIT_FINDING
+
+    document = json.loads(Path("out.json").read_text())
+    assert document["target"]["file"] == given
+    assert not Path(document["target"]["file"]).is_absolute()
 
 
 def test_minimize_on_a_clean_run_prints_the_block_and_says_there_is_nothing(capsys):

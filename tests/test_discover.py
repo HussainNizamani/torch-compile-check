@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -125,3 +127,55 @@ def test_target_that_raises_on_import_is_a_discovery_error():
     message = str(excinfo.value)
     assert "raised ValueError" in message
     assert "refuses to import" in message
+
+
+# --- target.file: relative to the cwd when under it, else exactly as given --
+
+
+def test_target_file_is_relative_to_the_cwd_when_the_target_lives_under_it(monkeypatch, tmp_path):
+    # A path-hygiene finding on the now-public repo: discovery used to resolve
+    # the target unconditionally, so every report -- and the 24 committed
+    # per-target JSONs under validation/results/ -- carried a contributor's
+    # absolute home directory. Under a cwd the target lives under, the display
+    # path is relative to it, e.g. "validation/targets/tv_resnet18.py".
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    shutil.copy(FIXTURES / "mlp.py", sub / "mlp.py")
+    monkeypatch.chdir(tmp_path)
+
+    target = load_target("sub/mlp.py")
+
+    assert target.source is not None
+    assert target.source.file == "sub/mlp.py"
+
+
+def test_target_file_outside_the_cwd_is_kept_exactly_as_given(monkeypatch, tmp_path):
+    # A target that does not live under the cwd is named the way the caller
+    # named it -- here an absolute path -- never a resolved path through a
+    # machine's home directory nobody asked to see.
+    monkeypatch.chdir(tmp_path)
+    given = str(FIXTURES / "mlp.py")
+
+    target = load_target(given)
+
+    assert target.source is not None
+    assert target.source.file == given
+
+
+def test_target_file_given_as_a_relative_path_outside_the_cwd_is_not_resolved(
+    monkeypatch, tmp_path
+):
+    # The case resolve() would get wrong: a relative path that leads outside
+    # the cwd. resolve() would turn "../fixtures/mlp.py" into an absolute path
+    # through this machine's temp directory; the display path is exactly what
+    # was typed instead.
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    given = os.path.relpath(FIXTURES / "mlp.py", work)
+
+    target = load_target(given)
+
+    assert target.source is not None
+    assert target.source.file == given
+    assert not Path(target.source.file).is_absolute()

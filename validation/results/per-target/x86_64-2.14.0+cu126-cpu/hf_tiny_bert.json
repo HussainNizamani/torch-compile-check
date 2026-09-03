@@ -6,7 +6,7 @@
   },
   "target": {
     "name": "hf_tiny_bert:model",
-    "file": "/home/hussainnizamani/torch-compile-check/validation/targets/hf_tiny_bert.py",
+    "file": "validation/targets/hf_tiny_bert.py",
     "entry": "model",
     "inputs": "get_inputs"
   },

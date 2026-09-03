@@ -36,7 +36,6 @@ Nothing here imports torch.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from pathlib import Path
 from typing import Any
 
 from torch_compile_check import __version__
@@ -240,7 +239,7 @@ def _repro(
     note = (
         "The target's own source, reduced to the statements the entry point and the inputs need."
         if repro.complete
-        else f"The whole of `{_short(repro.file) or runset.target_name}`: the entry point or the "
+        else f"The whole of `{repro.file or runset.target_name}`: the entry point or the "
         "inputs are not bound by a plain top-level statement, so the tool did not try to reduce it."
     )
     code = [*repro.future_imports, ""] if repro.future_imports else []
@@ -467,7 +466,7 @@ def _command(
 ) -> str:
     """The command that produced this, so a reader can run it themselves."""
     source = runset.target_source
-    target = _short(source.file) if source is not None else None
+    target = source.file if source is not None else None
     parts = ["torch-compile-check", target or runset.target_name]
     parts += ["--backends", ",".join(runset.backends)]
     if runset.device != "cpu":
@@ -507,29 +506,15 @@ def _compiled_lane(runset: RunSet) -> str:
 
 
 def _target_label(runset: RunSet) -> str:
-    """How the draft names the target: its file if it has one, else its symbol."""
-    source = runset.target_source
-    short = _short(source.file) if source is not None else None
-    return short or runset.target_name
+    """How the draft names the target: its file if it has one, else its symbol.
 
-
-def _short(path: str | None) -> str | None:
-    """A path as a reader would type it: relative to the working directory.
-
-    A path that is already relative is already that, and one that leads
-    somewhere else entirely is named by its file: a draft is read on GitHub, not
-    on the machine the run happened on, and an absolute path from a stranger's
-    home directory is noise in an issue.
+    ``source.file`` is already the path a report should show -- relative to the
+    working directory when the target lives under it, otherwise exactly what
+    was given on the command line (:mod:`torch_compile_check.discover`) -- so
+    there is nothing left to shorten here.
     """
-    if not path:
-        return None
-    location = Path(path)
-    if not location.is_absolute():
-        return str(location)
-    try:
-        return str(location.relative_to(Path.cwd()))
-    except ValueError:
-        return location.name
+    source = runset.target_source
+    return (source.file if source is not None else None) or runset.target_name
 
 
 def _show(value: Any) -> str:

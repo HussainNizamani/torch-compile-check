@@ -113,7 +113,7 @@ def load_target(
         example_inputs=args,
         kwargs=kwargs,
         name=name,
-        source=_target_source(module, entry_attr, inputs_attr, kwargs),
+        source=_target_source(module, entry_attr, inputs_attr, kwargs, path_or_module),
     )
 
 
@@ -122,6 +122,7 @@ def _target_source(
     entry_attr: str | None,
     inputs_attr: str | None,
     kwargs: Mapping[str, Any],
+    given: str,
 ) -> TargetSource:
     """Record where the target came from, for the reports that quote it.
 
@@ -130,6 +131,13 @@ def _target_source(
     been imported and executed, so the file it came from is not guaranteed to
     still be readable. Failing to read it is not a discovery failure -- a run
     with no Markdown repro is still a run -- so the text is simply ``None``.
+
+    :attr:`TargetSource.file` is computed here too, by :func:`_display_file`,
+    and is a *display* path rather than the resolved one the read above uses --
+    a report is read by a person, often on a different machine than the one the
+    run happened on, and a fully resolved path from a contributor's home
+    directory is a data-hygiene problem, not information (this is what a
+    committed ``validation/results/`` artifact used to leak).
     """
     path = _module_file(module)
     text: str | None = None
@@ -139,12 +147,30 @@ def _target_source(
         except OSError as exc:
             log.debug("could not read the target source at %s: %s", path, exc)
     return TargetSource(
-        file=str(path) if path is not None else None,
+        file=_display_file(path, given) if path is not None else None,
         text=text,
         entry=entry_attr,
         inputs=inputs_attr,
         keyword_inputs=tuple(kwargs),
     )
+
+
+def _display_file(resolved: Path, given: str) -> str:
+    """The path a report should show for *resolved*.
+
+    Relative to the working directory when the target lives under it, e.g.
+    ``validation/targets/tv_resnet18.py`` -- what a reader, on their own
+    machine or on GitHub, can actually act on. Otherwise exactly *given*: what
+    the caller (the CLI's own positional argument) typed, never the absolute
+    form ``resolve()`` produced to import it. That resolution is right for the
+    loader -- a target has to be found regardless of the working directory --
+    and wrong for a report, which is why the two are kept apart: this is the
+    only place a report's path comes from *resolved* rather than from *given*.
+    """
+    try:
+        return str(resolved.relative_to(Path.cwd()))
+    except ValueError:
+        return given
 
 
 def import_target_module(path_or_module: str) -> ModuleType:

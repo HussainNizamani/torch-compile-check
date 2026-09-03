@@ -197,7 +197,13 @@ Parity is `diff_parity.py` (below) against the aarch64
 per-target set: equal `schema_version` and identical `findings` sets, with
 `environment.machine` and `environment.cuda_available` printed but not
 gated. (This section is maintained by hand; `validation/run.py` regenerates
-only the single-host table in `docs/validation.md`.)
+only the single-host table in `docs/validation.md`.) The `target.file` field
+in every per-target JSON referenced below was normalised to a repo-relative
+path (`validation/targets/<name>.py`) on 2026-09-03, replacing a
+contributor's absolute home-directory path that a discovery bug used to
+write; nothing else in these files changed, and `diff_parity.py` (below)
+never reads that field, so every parity verdict already recorded here still
+holds.
 
 | Leg | Machine | torch | Python | Tool @ commit | Result | Per-target JSONs |
 |---|---|---|---|---|---|---|

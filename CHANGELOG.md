@@ -6,6 +6,30 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **path-hygiene**: `target.file` -- in the JSON report, the Markdown draft,
+  the emitted regression test's header comment, and the reduced repro -- is
+  now the path relative to the working directory when the target lives under
+  it, or exactly what was given on the command line otherwise, instead of
+  always the fully resolved path `discover.py` uses to import the file.
+  `resolve()` is still what discovery uses to find and read the target; only
+  what a report shows changed, so `schema_version` stays 2 (value format,
+  not shape).
+
+### Fixed
+
+- The committed per-target JSON results under `validation/results/per-target/`
+  no longer carry a contributor's absolute home-directory path in
+  `target.file` (24 files: 6 from the aarch64 baseline, 18 from the x86 RC
+  round) -- a discovery bug always resolved the target path before recording
+  it, and this repo went public with it still in the committed data. Every
+  value is now `validation/targets/<name>.py`, matching what
+  `torch-compile-check` is run with from the repo root; nothing else in
+  those files changed, and the cross-architecture parity comparison in
+  `docs/cross-arch.md` never read that field (path-hygiene finding, x86 RC
+  round).
+
 ## [0.1.0] - 2026-09-03
 
 This project was named `compile-check` through M4-3; the `### Changed` entry

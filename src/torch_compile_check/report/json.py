@@ -65,6 +65,15 @@ enforces::
          "notes": [str], "steps": int, "seconds": number,
          "partial": bool, "partial_reason": str|null, "handoff": str}
 
+``target.file`` is the path relative to the working directory when the target
+lives under it (``"validation/targets/tv_resnet18.py"``), otherwise exactly
+what was given on the command line -- never a path resolved through whichever
+machine happened to run the tool, which is what a committed
+``validation/results/`` artifact used to carry before this was fixed
+(:func:`torch_compile_check.discover._display_file`). That is a change to the
+*value* the field carries, not to its shape or its place in the document, so
+``schema_version`` does not move for it the way it did for ``minimized``.
+
 ``minimized`` is version 2's only change, and it is why the version moved:
 ``null`` there means ``--minimize`` was not asked for, and a v1 document has no
 such key at all, so a consumer written against one cannot read the other without

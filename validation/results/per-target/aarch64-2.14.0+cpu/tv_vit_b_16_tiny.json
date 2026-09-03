@@ -6,7 +6,7 @@
   },
   "target": {
     "name": "tv_vit_b_16_tiny:model",
-    "file": "/home/ubuntu/cc-xarch-baseline/validation/targets/tv_vit_b_16_tiny.py",
+    "file": "validation/targets/tv_vit_b_16_tiny.py",
     "entry": "model",
     "inputs": "inputs"
   },

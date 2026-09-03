@@ -6,7 +6,7 @@
   },
   "target": {
     "name": "tv_efficientnet_b0:model",
-    "file": "/home/ubuntu/cc-xarch-baseline/validation/targets/tv_efficientnet_b0.py",
+    "file": "validation/targets/tv_efficientnet_b0.py",
     "entry": "model",
     "inputs": "inputs"
   },

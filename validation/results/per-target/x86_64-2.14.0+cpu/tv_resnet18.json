@@ -6,7 +6,7 @@
   },
   "target": {
     "name": "tv_resnet18:model",
-    "file": "/home/hussainnizamani/torch-compile-check/validation/targets/tv_resnet18.py",
+    "file": "validation/targets/tv_resnet18.py",
     "entry": "model",
     "inputs": "inputs"
   },

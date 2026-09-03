@@ -121,7 +121,12 @@ class Repro:
     """The issue URL the module docstring names, when it names one."""
 
     file: str | None = None
-    """The path the source came from, for a report to cite."""
+    """The path the source came from, for a report to cite.
+
+    Copied straight from :attr:`~torch_compile_check.results.TargetSource.file`,
+    which is already the display form -- relative to the working directory or
+    exactly as given, never a resolved path -- so nothing here shortens it
+    again."""
 
 
 def extract(source: TargetSource | None) -> Repro | None:
