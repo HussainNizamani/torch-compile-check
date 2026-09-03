@@ -31,7 +31,16 @@ edited case re-runs rather than reports a stale verdict. Nothing depends on the
 file: it is written best-effort, every read failure falls back to running the
 script, and the table says how many rows came from it.
 ``TORCH_COMPILE_CHECK_OBSERVATIONS`` points the file somewhere else; set to an empty
-value it switches that half of the caching off entirely.
+value it switches that half of the caching off entirely, and so does the
+``--no-cache`` flag.
+
+An ``UNKNOWN`` observation -- a script that crashed, timed out, or exited with
+a code neither RED nor GREEN -- is never written to the file, and an
+``UNKNOWN`` entry an older cache may already hold is read back as a miss. A
+crash usually says something is wrong with *this machine* (a missing compiler,
+absent Python headers), not with the case; caching it would mean fixing the
+machine and then still being told the case is unplaced, forever, until the
+file is deleted or ``--no-cache`` is passed.
 
 Nothing here decides that a disagreement is a failure. PLAN.md "Regression
 corpus" makes the marker a recorded expectation and the script the measurement;
@@ -42,6 +51,7 @@ exit code is 0 unless this module could not run at all.
 
 from __future__ import annotations
 
+import argparse
 import functools
 import hashlib
 import json
@@ -163,12 +173,19 @@ def _read_cache() -> dict[str, Any]:
 
 
 def _cached(case: str, source: str) -> Observation | None:
-    """One reusable observation, or ``None`` when there is nothing to reuse."""
+    """One reusable observation, or ``None`` when there is nothing to reuse.
+
+    ``UNKNOWN`` is not reusable, on the read side as well as the write side
+    (:func:`observe`): a crash is environment state, not a verdict about the
+    case, and an older cache file written before this rule existed may still
+    hold one. Read it back as a miss -- the same as no entry at all -- rather
+    than replaying a fixed environment's dead compile forever.
+    """
     entry = _read_cache().get(case)
     if not isinstance(entry, dict) or entry.get("source") != source:
         return None
     verdict = entry.get("verdict")
-    if verdict not in ("RED", "GREEN", "UNKNOWN") or not isinstance(entry.get("exit_code"), int):
+    if verdict not in ("RED", "GREEN") or not isinstance(entry.get("exit_code"), int):
         return None
     return Observation(
         case=case,
@@ -269,7 +286,13 @@ def observe(case: str, timeout: float = 900.0) -> Observation:
         exit_code=completed.returncode,
         line=_verdict_line(completed.stdout, completed.stderr),
     )
-    if source is not None:
+    # Same rule as the timeout above, for the same reason: a crash (exit 2, or
+    # any code this module does not recognize) is UNKNOWN because the
+    # *environment* could not place the case, not because the case measured
+    # anything. A broken compiler toolchain or missing headers makes every
+    # script in the corpus exit 2; caching that would mean fixing the
+    # environment and re-running still reports the dead build's verdict.
+    if source is not None and observation.verdict != "UNKNOWN":
         _store(case, observation, source)
     return observation
 
@@ -316,22 +339,45 @@ def render_table(observations: list[Observation], torch_version: str, git_versio
         "note, not a failure: it means the marker is out of date or this torch "
         "moved, and `cases/markers.py` is where it is recorded."
     )
+    # Said out loud, always, because a reader is entitled to know which rows
+    # are a fresh measurement and which came from the pytest run that preceded
+    # this one -- including "none of them", which is the shape a re-run after
+    # a crashed environment must have, now that an UNKNOWN observation is
+    # never written to the cache. The fingerprint the cache is keyed by is in
+    # the heading above: same torch, same interpreter, same machine, same case
+    # source.
     reused = sum(1 for observation in observations if observation.cached)
-    if reused:
-        # Said out loud, because a reader is entitled to know which rows are a
-        # fresh measurement and which came from the pytest run that preceded
-        # this one. The fingerprint the cache is keyed by is in the heading
-        # above: same torch, same interpreter, same machine, same case source.
+    fresh = total - reused
+    path = cache_file()
+    if path is None:
+        tally += (
+            f" {reused} of the {total} {'was' if reused == 1 else 'were'} reused: "
+            "the observation cache is off."
+        )
+    else:
         tally += (
             f" {reused} of the {total} {'was' if reused == 1 else 'were'} reused from the "
-            f"observation cache ({cache_file()}) rather than re-run."
+            f"observation cache ({path}) rather than re-run; {fresh} "
+            f"{'was' if fresh == 1 else 'were'} freshly run."
         )
     return "\n".join([heading, "", *rows, "", tally])
 
 
 def main(argv: list[str] | None = None) -> int:
     """Run every corpus case and print the table. Always exit 0 on a real run."""
-    del argv  # no flags: the module does one thing, and CI redirects its output
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help=(
+            "skip the observation cache entirely: every case is re-run and "
+            f"nothing is written, the same as `{CACHE_ENV_VAR}=` (empty)"
+        ),
+    )
+    args = parser.parse_args(argv)
+    if args.no_cache:
+        os.environ[CACHE_ENV_VAR] = ""
+
     import torch
 
     observations = [observe(case) for case in CASES]

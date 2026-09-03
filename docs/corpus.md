@@ -67,7 +67,23 @@ value to switch it off:
 
 ```console
 $ TORCH_COMPILE_CHECK_OBSERVATIONS= python -m cases.summary   # always re-run everything
+$ python -m cases.summary --no-cache                          # the same thing, as a flag
 ```
+
+The cache never stores a crash. A case that exits 2 -- a compile that failed
+because the C++ toolchain is missing or misconfigured, a timeout, anything
+that is not a clean RED or GREEN -- is `UNKNOWN`, and an `UNKNOWN` observation
+is never written to the file; the tally line's "N of the M were reused" always
+counts actual RED/GREEN verdicts, down to zero. This is what makes the cache
+safe across an environment change: a broken box that cannot compile anything
+would otherwise cache "every case is UNKNOWN" and keep answering that once the
+box is fixed, since nothing about the case's own source changed, only the
+machine's ability to run it. When the environment does change underneath this
+file -- a new compiler, installed headers, an upgraded torch that was masked
+by an unrelated failure -- clear `/tmp/torch-compile-check-observations-*.json`
+or pass `--no-cache` (equivalently, `TORCH_COMPILE_CHECK_OBSERVATIONS=`) to be
+sure the next run measures the box as it actually is now, not as the cache
+last saw it.
 
 A single twin through the actual CLI, for comparison:
 

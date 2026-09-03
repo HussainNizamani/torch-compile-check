@@ -79,10 +79,15 @@ renamed an API an oracle reads.
 
 `python -m cases.summary` runs every standalone RED/GREEN script in `cases/`
 and grades it against `cases/markers.py`'s known-bad table
-([corpus.md](corpus.md)). Real output, captured here on aarch64:
+([corpus.md](corpus.md)). Pass `--no-cache` on a fresh machine's *first* run:
+the observation cache lives under the system temporary directory and is keyed
+by this checkout's path, not by machine identity, so a box that was ever used
+for another checkout — or a container image built from one — could already
+have a file sitting there from a run this box never actually did. Real
+output, captured here on aarch64:
 
 ```console
-$ python -m cases.summary
+$ python -m cases.summary --no-cache
 ### torch-compile-check regression corpus -- torch 2.14.0+cpu (git 08187d9e0fba), python 3.10.12, aarch64
 
 | Case | Issue | Oracle | Observed | Expected | Agrees |
@@ -93,7 +98,7 @@ $ python -m cases.summary
 | `distributions_validation_branch` | #194593 | graph | RED | RED | yes |
 | `numerics_cpu_inductor_miscompile` | #190765 | numerics | GREEN | GREEN | yes |
 
-5 cases: 5 agree with the marker, 0 disagree, 0 could not be placed.
+5 cases: 5 agree with the marker, 0 disagree, 0 could not be placed. 0 of the 5 were reused: the observation cache is off.
 ```
 
 A disagreement here is a note, not a failure (a nightly that fixes a bug
@@ -102,6 +107,18 @@ upstream must not turn the box red) — but a disagreement that differs
 is exactly the kind of fact this runbook exists to surface. Run it on both
 boxes and compare the `Observed` column by hand first; it is five lines and
 catches the coarse case before any JSON is involved.
+
+The cache never stores a crash: a case that exits 2 is `UNKNOWN`, and an
+`UNKNOWN` verdict is never written, so it cannot be replayed once whatever
+broke the run is fixed. This matters most on exactly the kind of box this
+runbook is about — a second machine, freshly set up, where a missing compiler
+or absent Python headers can make every case in the corpus exit 2 the first
+time round. Setting up the box (step 1 above) fixes that, but the observation
+cache does not know it happened; if a first attempt at this step ran *before*
+the box was fully set up, clear the stale file —
+`rm /tmp/torch-compile-check-observations-*.json` — or pass `--no-cache`
+again, rather than trust a rerun that could otherwise (pre-M4-6) have quietly
+replayed the earlier crash as this run's answer.
 
 ## 3. Produce comparable JSON
 
