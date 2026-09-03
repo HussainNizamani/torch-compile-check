@@ -85,3 +85,35 @@ CLI's own default), backends `eager,aot_eager,inductor`.
 | `tv_vit_b_16_tiny` | clean | 0 | none | clean: no backend diverged from eager across 2 lanes | 18.9 |
 | `hf_tiny_bert` | clean | 0 | none | clean: no backend diverged from eager across 2 lanes | 19.4 |
 | `train_step_mlp` | clean | 0 | none | clean: no backend diverged from eager across 2 lanes | 10.7 |
+
+## Cross-architecture runs
+
+The table above is the aarch64 reference, committed as the per-target set
+under `validation/results/per-target/aarch64-2.14.0+cpu/`. The same six
+targets were then run on two more machines to confirm a verdict is a
+property of the model and compiler, not of the host. The tool name differs
+across the rows only because the distribution was renamed from
+`compile-check` to `torch-compile-check` mid-round (PR #20) -- that changes
+`tool.name`, which the parity comparison does not read, and nothing else.
+Parity is `diff_parity.py` (`docs/cross-arch.md`) against the aarch64
+per-target set: equal `schema_version` and identical `findings` sets, with
+`environment.machine` and `environment.cuda_available` printed but not
+gated. (This section is maintained by hand; `validation/run.py` regenerates
+only the single-host table above.)
+
+| Leg | Machine | torch | Python | Tool @ commit | Result | Per-target JSONs |
+|---|---|---|---|---|---|---|
+| aarch64 CPU (reference) | estate, aarch64 | `2.14.0+cpu` (git `08187d9e0fba`) | 3.10.12 | `torch-compile-check 0.1.0` @ `570b789` (content-identical to main) | 6/6 clean, exit 0, 0 findings | `per-target/aarch64-2.14.0+cpu/` |
+| x86_64 CPU | ProBook, AVX2 | `2.14.0+cpu` | 3.12.14 | `compile-check 0.1.0` @ `4caf42c` | 6/6 parity holds, exit 0, 0 findings | `per-target/x86_64-2.14.0+cpu/` |
+| x86_64 CPU (Omen leg) | Omen, Ryzen 4800H | `2.14.0+cu126` | 3.12.13 | `compile-check 0.1.0` @ `dcaf77d` | 6/6 clean, exit 0, 0 findings | pending collection |
+| x86_64 + CUDA sm_75 | Omen, GTX 1660 Ti | `2.14.0+cu126` | 3.12.13 | `compile-check 0.1.0` @ `dcaf77d` | 6/6 clean, exit 0, 0 findings | pending collection |
+
+The aarch64 and ProBook legs are diffed from committed JSONs here
+(`diff_parity.py`, 6/6 `parity holds`; transcript in `docs/cross-arch.md`).
+The two Omen legs (CPU and CUDA, torch `2.14.0+cu126`) are transcribed from
+Turing's 2026-09-03 00:56 UTC report: 12 runs (6 targets x CPU and CUDA),
+every one exit 0 with 0 findings and `schema_version` 2, and
+`environment.cuda_available=True` on both (a box fact, not the run device).
+Their physical per-target JSONs (`per-target/x86_64-2.14.0+cu126-cpu/` and
+`per-target/x86_64-2.14.0+cu126-cuda/`) are pending collection from the Omen
+and land in a follow-up PR.
