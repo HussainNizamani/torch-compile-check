@@ -6,7 +6,7 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-## [0.1.0] — 2026-09-03
+## [0.1.0] - 2026-09-03
 
 This project was named `compile-check` through M4-3; the `### Changed` entry
 below is the M4-5 rename to `torch-compile-check`. Everything else in this
